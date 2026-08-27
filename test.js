@@ -88,6 +88,15 @@ assert.deepStrictEqual(splitMath("a \\(x\\) b").map(bare),
 	"zbMATH delimiters");
 assert.strictEqual(splitMath("\\[x\\]")[0].display, true, "\\[..\\] is display math");
 assert.strictEqual(splitMath("$$x$$")[0].display, true, "$$..$$ is display math");
+// A "$" inside a group belongs to the formula. MathJax writes tags this way, and
+// closing at the first bare "$" left "\\tag{" as the entire equation.
+assert.deepStrictEqual(
+	splitMath("eq $$\\tag{$\\ast$}{N \\choose n}$$ end").map((r) => r.text),
+	["eq ", "\\tag{$\\ast$}{N \\choose n}", " end"],
+	"a nested $ inside braces does not close the run");
+assert.strictEqual(splitMath("$$\\tag{$x$}a$$")[0].display, true, "and it stays display maths");
+assert.strictEqual(splitMath("$$a$b$$")[0].text, "a$b", "a lone $ does not close $$");
+assert.strictEqual(splitMath("$\\text{a $b$ c}$")[0].text, "\\text{a $b$ c}", "inline nests too");
 assert.strictEqual(splitMath("$x$")[0].display, false, "$..$ is inline");
 assert.deepStrictEqual(splitMath("costs \\$5").map(bare), [{ math: false, text: "costs \\$5" }],
 	"an escaped dollar is not math");

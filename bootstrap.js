@@ -418,9 +418,20 @@ function splitMath(text) {
 		let j = i + (display ? 2 : 1);
 		let body = "";
 		let closed = false;
+		let depth = 0;
 		while (j < s.length) {
 			if (s[j] === "\\" && j + 1 < s.length) { body += s.slice(j, j + 2); j += 2; continue; }
-			if (s[j] === "$") { closed = true; break; }
+			const c = s[j];
+			// A "$" inside a group belongs to the formula, not to its delimiters:
+			// "$$\tag{$\ast$}...$$" is one run, and closing at the first bare "$"
+			// left \tag{ as the whole equation and shredded the rest of the line.
+			if (c === "{") depth++;
+			else if (c === "}") depth = Math.max(0, depth - 1);
+			// Display maths is closed by "$$", never by a single "$".
+			else if (c === "$" && depth === 0 && (!display || s[j + 1] === "$")) {
+				closed = true;
+				break;
+			}
 			body += s[j++];
 		}
 		if (!closed) { plain += s.slice(start); break; } // unbalanced
@@ -433,7 +444,7 @@ function splitMath(text) {
 		}
 		flush();
 		out.push({ math: true, display, text: body });
-		i = j + (display && s[j + 1] === "$" ? 2 : 1);
+		i = j + (display ? 2 : 1);
 	}
 	flush();
 	return out;
