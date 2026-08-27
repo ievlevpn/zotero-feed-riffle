@@ -104,10 +104,11 @@ prose, the math and the chrome together rather than drifting apart.
 
 **Prose is set as prose:** `--` becomes an en dash, `` ``quoted'' `` becomes
 curly quotes, and text is held to a readable measure — about 34rem, near the 75
-characters past which the eye starts losing the next line. The window is sized
-to that column rather than the other way round, so the default has no dead
-margin and a larger font opens a proportionally larger window. Widen it and the
-column stays put and centres, the way a reader should. Descriptions are set in a serif, which is what
+characters past which the eye starts losing the next line. The window opens at a
+fixed 600×760, chosen to fit that column with no dead margin, and stays that
+shape whatever the item or the font size. Resize it and the size is remembered;
+widen it past the column and the text centres rather than hugging the left edge,
+the way a reader should. Descriptions are set in a serif, which is what
 long-form reading wants and what sits with KaTeX's Computer Modern — a sans body
 beside serif formulas reads as two documents stapled together. The chrome stays
 in the system UI font, because it is UI. Hyphenation is on, using the item's own

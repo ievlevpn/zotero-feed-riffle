@@ -22,6 +22,12 @@ const BASE_PX = 15;   // reading size at scale 1, before Zotero's own setting
 // dead space, which is exactly what a hardcoded default width produced.
 const MEASURE_REM = 34;
 const CARD_PAD_REM = 2.2;
+// One fixed default, so the window is the same shape every time it opens. Wide
+// enough for the column plus the card's padding and a scrollbar at the default
+// font size; turn the font up and the column narrows inside this frame rather
+// than the furniture moving. Nothing here depends on the item being shown.
+const WIN_W = 600;
+const WIN_H = 760;
 const SIZE_MIN = 0.7, SIZE_MAX = 2.4, SIZE_STEP = 0.08;
 const AHEAD = 25;   // items hydrated ahead of the cursor
 const BEHIND = 50;  // and kept behind it, so undo does not have to refetch
@@ -472,22 +478,12 @@ function saveState(w) {
 }
 
 // A window remembered on one screen can be off every screen on the next launch.
-// Sized to the text it holds. Width is the column plus the card's padding and
-// room for a scrollbar, at whatever font size is in effect — so the default
-// window has no dead margin, and a larger font opens a proportionally larger
-// window instead of squeezing the same column. Height cannot be derived the
-// same way, since abstracts run from two lines to twenty, so it takes a
-// generous share of the screen within sane bounds.
+// Always WIN_W by WIN_H, shrunk only if the display is smaller than that.
 function defaultSize(main) {
-	const rem = fontPx();
 	const screen = safe(() => main.screen, null);
-	const availW = (screen && screen.availWidth) || 1440;
-	const availH = (screen && screen.availHeight) || 900;
-	return {
-		w: Math.min(Math.round((MEASURE_REM + 2 * CARD_PAD_REM) * rem) + 18,
-			Math.round(availW * 0.9)),
-		h: Math.max(520, Math.min(Math.round(availH * 0.8), 940)),
-	};
+	const availW = (screen && screen.availWidth) || WIN_W;
+	const availH = (screen && screen.availHeight) || WIN_H;
+	return { w: Math.min(WIN_W, availW - 40), h: Math.min(WIN_H, availH - 60) };
 }
 
 function features(main) {
