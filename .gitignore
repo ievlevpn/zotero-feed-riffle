@@ -1,3 +1,5 @@
 *.xpi
 node_modules/
 .DS_Store
+.shot-*.html
+.playwright-mcp/

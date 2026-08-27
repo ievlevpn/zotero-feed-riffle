@@ -10,6 +10,13 @@ backlog exists.
 Feed Riffle deals the unread items out one card at a time and puts the whole
 decision on the arrow keys.
 
+![A feed item as a card: title, authors, abstract with typeset math](docs/card.png)
+
+Right arrow opens the filing panel: fuzzy-search your collections, add tags, add
+a note.
+
+![The filing panel: a fuzzy collection search matching "rand fields" against "Gaussian random fields", with a tag chip below](docs/filing.png)
+
 ## Use
 
 **Tools → Riffle Feeds…** for every feed at once, or right-click a feed in the
