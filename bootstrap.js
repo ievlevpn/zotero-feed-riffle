@@ -491,11 +491,13 @@ async function hydrate(from) {
 	const want = ids.slice(from, from + AHEAD).filter((id) => !cache.has(id));
 	if (!want.length) return;
 	const items = await Zotero.Items.getAsync(want);
-	// getAsync returns objects carrying only primary data. getField() and
-	// getCreators() each demand their own data type and throw
+	// getAsync returns objects carrying only primary data. getField(),
+	// getCreators() and getTags() each demand their own data type and throw
 	// UnloadedDataException without it — which rendered a card with a working
-	// header and nothing under it. One bulk load per batch, not per item.
-	await Zotero.Items.loadDataTypes(items, ["itemData", "creators"]);
+	// header and nothing under it. Tags are needed even when a feed sends none:
+	// Zotero.Item#clone reads them, so filing throws without this.
+	// One bulk load per batch, not per item.
+	await Zotero.Items.loadDataTypes(items, ["itemData", "creators", "tags"]);
 	for (const it of items) cache.set(it.id, it);
 }
 
@@ -633,6 +635,12 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .badge.replace { border-color:color-mix(in srgb, Highlight 55%, Canvas);
 	color:color-mix(in srgb, Highlight 75%, CanvasText); }
 
+/* Whatever tags the feed itself supplied. */
+.tags { display:flex; flex-wrap:wrap; gap:.3rem; margin:-.9rem 0 1.45rem; }
+.tag { font-size:.72rem; padding:.1em .5em; border-radius:1em; color:GrayText;
+	background:color-mix(in srgb, GrayText 13%, Canvas);
+	border:1px solid color-mix(in srgb, GrayText 28%, Canvas); }
+
 /* Hyphenation earns its place at this measure: it takes the worst of the rag
  * out of a column this narrow. The limits keep it off short words. */
 .abs { font-size:1rem; line-height:1.62; overflow-wrap:break-word;
@@ -688,7 +696,10 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	color:color-mix(in srgb, CanvasText 70%, Canvas);
 	background:color-mix(in srgb, GrayText 14%, Canvas);
 	border-left:2px solid color-mix(in srgb, GrayText 50%, Canvas); }
-.url { margin-top:1.7rem; font-size:.78rem; color:GrayText; overflow-wrap:anywhere; }
+.url { display:block; margin-top:1.7rem; font-size:.78rem; color:GrayText;
+	overflow-wrap:anywhere; text-decoration:none; cursor:pointer; }
+.url:hover { color:color-mix(in srgb, Highlight 72%, CanvasText);
+	text-decoration:underline; text-underline-offset:.16em; }
 
 /* The card is replaced wholesale on every advance, so a keyframe on the new
  * node is all the motion this needs — no transition bookkeeping. */
@@ -887,14 +898,6 @@ function abstractNode(doc, raw, baseURL) {
 		markClassMath(frag);
 		typesetInto(doc, frag);
 		box.append(frag);
-		// A link opens in the real browser: this window is the riffle UI, and
-		// navigating it away would end the session.
-		box.addEventListener("click", (e) => {
-			const a = e.target.closest && e.target.closest("a[href]");
-			if (!a) return;
-			e.preventDefault();
-			safe(() => Zotero.launchURL(a.href));
-		});
 		return box;
 	}
 
@@ -990,6 +993,15 @@ function build(w) {
 	head.append(feedName, count);
 
 	const cardBox = el(doc, "div", "card");
+	// Links open in the real browser: this window is the riffle UI, and
+	// navigating it away would end the session. Delegated from the card, which
+	// outlives each render, so it covers the description and the item URL both.
+	cardBox.addEventListener("click", (e) => {
+		const a = e.target && e.target.closest && e.target.closest("a[href]");
+		if (!a) return;
+		e.preventDefault();
+		safe(() => Zotero.launchURL(a.href));
+	});
 	const bar = el(doc, "div", "bar");
 	doc.body.append(head, cardBox, bar);
 
@@ -1102,6 +1114,15 @@ function build(w) {
 		if (kind) meta.append(el(doc, "span", "badge " + kind, kind));
 		if (meta.childNodes.length) cardBox.append(meta);
 
+		// Only what the feed itself put on the item — nothing inferred from the
+		// title, the collection or anything else.
+		const feedTags = safe(() => item.getTags(), []).map((t) => t.tag).filter(Boolean);
+		if (feedTags.length) {
+			const row = el(doc, "div", "tags");
+			for (const t of feedTags) row.append(el(doc, "span", "tag", t));
+			cardBox.append(row);
+		}
+
 		cardBox.append(body
 			? abstractNode(doc, body, item.getField("url"))
 			: el(doc, "div", "abs empty", "No abstract."));
@@ -1112,7 +1133,11 @@ function build(w) {
 		}
 
 		const url = item.getField("url");
-		if (url) cardBox.append(el(doc, "div", "url", url));
+		if (url) {
+			const a = el(doc, "a", "url", url);
+			a.href = url;
+			cardBox.append(a);
+		}
 
 		cardHints();
 		hydrate(cursor).catch(oops);

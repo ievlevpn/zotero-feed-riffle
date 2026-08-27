@@ -92,12 +92,23 @@ prose, the math and the chrome together rather than drifting apart.
 curly quotes, and text is held to a readable measure (about 34em, near the 75
 characters past which the eye starts losing the next line) instead of running the
 full width of the window. Descriptions are set in a serif, which is what
-long-form reading wants and what sits with KaTeX\'s Computer Modern — a sans body
+long-form reading wants and what sits with KaTeX's Computer Modern — a sans body
 beside serif formulas reads as two documents stapled together. The chrome stays
-in the system UI font, because it is UI. Hyphenation is on, using the item\'s own
-language field, since at this measure it takes the worst of the rag out. Author names are de-LaTeXed (`Bu\v{s}i\'{c}` → `Bušić`),
-and common feed boilerplate is dropped — arXiv's `Announce Type:` header becomes
-a small badge, so a revision reads differently from a new paper at a glance.
+in the system UI font, because it is UI. Hyphenation is on, using the item's own
+language field, since at this measure it takes the worst of the rag out.
+
+**Author names are de-LaTeXed** (`Bu\v{s}i\'{c}` → `Bušić`), and common feed
+boilerplate is dropped — arXiv's `Announce Type:` header becomes a small badge,
+so a revision reads differently from a new paper at a glance.
+
+**Tags the feed itself supplied** are shown under the byline, and carried over
+when you file the item. Nothing is inferred from the title or anywhere else.
+Worth knowing: Zotero's feed reader does not currently turn RSS `<category>`
+elements into tags — `feedReader.js` marks that "not yet implemented" — so for
+most feeds this shows nothing today.
+
+**The item URL is a link**, as is anything linked inside a description. Both
+open in your browser rather than navigating the riffle window away.
 
 ### When the importer has already broken it
 
