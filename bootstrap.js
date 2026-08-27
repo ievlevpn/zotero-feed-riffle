@@ -17,6 +17,11 @@ const LAST_PREF = "feedRiffle.lastCollection"; // collection id Enter defaults t
 const STATE_PREF = "feedRiffle.state";         // window geometry
 const SIZE_PREF = "feedRiffle.fontScale";      // your own +/- adjustment
 const BASE_PX = 15;   // reading size at scale 1, before Zotero's own setting
+// The text column, and the card's side padding, in rem. The stylesheet and the
+// window sizer both read these: a window wider than the column it holds is
+// dead space, which is exactly what a hardcoded default width produced.
+const MEASURE_REM = 34;
+const CARD_PAD_REM = 2.2;
 const SIZE_MIN = 0.7, SIZE_MAX = 2.4, SIZE_STEP = 0.08;
 const AHEAD = 25;   // items hydrated ahead of the cursor
 const BEHIND = 50;  // and kept behind it, so undo does not have to refetch
@@ -440,9 +445,14 @@ function loadScale() {
 // matching the rest of the app; +/- adjusts from there. Everything in the
 // stylesheet is in rem, so this one number moves the card, the maths and the
 // chrome together.
-function applyFontSize(w) {
+// The effective rem: Zotero's own font-size setting times your +/- adjustment.
+function fontPx() {
 	const z = parseFloat(safe(() => Zotero.Prefs.get("fontSize"), 1)) || 1;
-	const px = BASE_PX * z * fontScale;
+	return BASE_PX * z * fontScale;
+}
+
+function applyFontSize(w) {
+	const px = fontPx();
 	safe(() => { w.document.documentElement.style.fontSize = px.toFixed(2) + "px"; });
 	return px;
 }
@@ -462,10 +472,29 @@ function saveState(w) {
 }
 
 // A window remembered on one screen can be off every screen on the next launch.
+// Sized to the text it holds. Width is the column plus the card's padding and
+// room for a scrollbar, at whatever font size is in effect — so the default
+// window has no dead margin, and a larger font opens a proportionally larger
+// window instead of squeezing the same column. Height cannot be derived the
+// same way, since abstracts run from two lines to twenty, so it takes a
+// generous share of the screen within sane bounds.
+function defaultSize(main) {
+	const rem = fontPx();
+	const screen = safe(() => main.screen, null);
+	const availW = (screen && screen.availWidth) || 1440;
+	const availH = (screen && screen.availHeight) || 900;
+	return {
+		w: Math.min(Math.round((MEASURE_REM + 2 * CARD_PAD_REM) * rem) + 18,
+			Math.round(availW * 0.9)),
+		h: Math.max(520, Math.min(Math.round(availH * 0.8), 940)),
+	};
+}
+
 function features(main) {
 	const g = geometry;
 	if (!g || !(g.w > 200) || !(g.h > 200)) {
-		return "chrome,centerscreen,resizable,scrollbars,width=780,height=680";
+		const d = defaultSize(main);
+		return `chrome,centerscreen,resizable,scrollbars,width=${d.w},height=${d.h}`;
 	}
 	let where = "centerscreen";
 	const screen = safe(() => main.screen, null);
@@ -647,14 +676,18 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .head .count { margin-left:auto; font-size:.74rem; color:GrayText;
 	white-space:nowrap; font-variant-numeric:tabular-nums; }
 
-.card { flex:1; min-height:0; overflow-y:auto; padding:2rem 2.2rem 2.8rem; }
+.card { flex:1; min-height:0; overflow-y:auto;
+	padding:2rem ${CARD_PAD_REM}rem 2.8rem; }
 /* A measure, not the window width: past about 75 characters the eye loses the
  * start of the next line. rem, not em — em would resolve against each element's
  * own size, handing the 1.5rem title a column half again as wide as the prose
  * under it. */
-.card > * { max-width:34rem; }
+/* Centred, so a window widened past the column reads as a deliberate reading
+ * measure rather than text hugging the left edge. At the default size the
+ * window is the column, so this changes nothing until you resize. */
+.card > * { max-width:${MEASURE_REM}rem; margin-inline:auto; }
 
-.card h1 { font-size:1.5rem; line-height:1.25; margin:0 0 .55rem; font-weight:600;
+.card h1 { font-size:1.5rem; line-height:1.25; margin:0 auto .55rem; font-weight:600;
 	letter-spacing:-.011em; text-wrap:balance; }
 
 .meta { display:flex; flex-wrap:wrap; align-items:center; gap:.35rem .7rem;
@@ -668,7 +701,7 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	color:color-mix(in srgb, Highlight 75%, CanvasText); }
 
 /* Whatever tags the feed itself supplied. */
-.tags { display:flex; flex-wrap:wrap; gap:.3rem; margin:-.9rem 0 1.45rem; }
+.tags { display:flex; flex-wrap:wrap; gap:.3rem; margin:-.9rem auto 1.45rem; }
 .tag { font-size:.72rem; padding:.1em .5em; border-radius:1em; color:GrayText;
 	background:color-mix(in srgb, GrayText 13%, Canvas);
 	border:1px solid color-mix(in srgb, GrayText 28%, Canvas); }
