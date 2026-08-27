@@ -29,10 +29,19 @@ Each card shows the title, authors, date and abstract.
 | <kbd>←</kbd> | discard — marks it read and moves on |
 | <kbd>→</kbd> | keep — opens the filing panel |
 | <kbd>u</kbd> / <kbd>Ctrl</kbd>+<kbd>Z</kbd> | undo the last discard or save |
+| <kbd>f</kbd> | switch feed (or click the feed name) |
 | <kbd>o</kbd> | open the paper in your browser |
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
 | <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> | text bigger, smaller, reset (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> too) |
 | <kbd>Esc</kbd> | close |
+
+### Switching feeds
+
+The feed name in the top left is also the scope control: click it, or press
+<kbd>f</kbd>, for a fuzzy search over your feeds with the unread count beside
+each. Pick one to riffle just that feed, or *All feeds* for everything at once.
+
+![The feed picker: a fuzzy search over feeds with unread counts](docs/feeds.png)
 
 ### Filing
 

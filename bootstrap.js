@@ -553,6 +553,16 @@ async function hydrate(from) {
 	for (const it of items) cache.set(it.id, it);
 }
 
+// Every feed, plus an "all" row, ordered by how much is waiting in each. The
+// counts are Zotero's own, so they agree with the collections pane.
+function feedRows() {
+	const feeds = safe(() => Zotero.Feeds.getAll(), [])
+		.map((f) => ({ id: f.libraryID, name: f.name, n: safe(() => f.unreadCount, 0) }))
+		.sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+	const total = feeds.reduce((sum, f) => sum + f.n, 0);
+	return [{ id: null, name: "All feeds", n: total }].concat(feeds);
+}
+
 // Every collection you could file into, flattened depth-first and carrying the
 // path that makes it searchable: "Probability / Rough paths".
 function flatCollections() {
@@ -665,10 +675,39 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .card h1, .abs { font-family:"Iowan Old Style", Charter, "Palatino Linotype",
 	Palatino, Georgia, "Times New Roman", serif; }
 
-.head { display:flex; align-items:baseline; gap:.7rem; padding:.6rem 1.1rem;
+.head { position:relative; display:flex; align-items:baseline; gap:.7rem;
+	padding:.6rem 1.1rem;
 	border-bottom:1px solid color-mix(in srgb, GrayText 35%, Canvas); }
+/* The feed name is the scope control. Same colour as before — only a hit area
+ * and a hover tint mark it as something you can press. */
 .head .feed { font-size:.8rem; color:GrayText; overflow:hidden;
-	text-overflow:ellipsis; white-space:nowrap; }
+	text-overflow:ellipsis; white-space:nowrap; cursor:pointer;
+	padding:.15em .4em; margin:-.15em -.4em; border-radius:4px;
+	transition:background .12s; }
+.head .feed:hover { background:color-mix(in srgb, GrayText 20%, Canvas); }
+.head .feed::after { content:" ▾"; opacity:.65; }
+
+/* Anchored under the feed name, and reuses .drop for the list itself. */
+.feedpick { position:absolute; top:calc(100% + .3rem); left:.75rem; z-index:20;
+	width:min(26rem, 78vw); padding:.4rem; background:Canvas; border-radius:7px;
+	border:1px solid color-mix(in srgb, GrayText 45%, Canvas);
+	box-shadow:0 6px 22px rgba(0,0,0,.3); }
+.feedpick input { width:100%; box-sizing:border-box;
+	font:.88rem/1.45 system-ui, -apple-system, sans-serif;
+	background:Canvas; color:CanvasText; padding:.25rem .5rem; border-radius:5px;
+	border:1px solid color-mix(in srgb, GrayText 45%, Canvas); }
+.feedpick input:focus { outline:none; border-color:Highlight;
+	box-shadow:0 0 0 2px color-mix(in srgb, Highlight 30%, transparent); }
+/* Inside the popup the list is just a list: no second border or shadow, and it
+ * drops downward rather than up like the filing panel's. */
+.feedpick .drop { position:static; margin-top:.35rem; max-height:42vh;
+	border:none; box-shadow:none; border-radius:4px; }
+.feedpick .drop div { display:flex; align-items:baseline; gap:.6rem; }
+.feedpick .drop div span { flex:1; min-width:0; overflow:hidden;
+	text-overflow:ellipsis; }
+.feedpick .drop b { font-weight:400; font-size:.78em; color:GrayText;
+	font-variant-numeric:tabular-nums; }
+.feedpick .drop div.on b { color:HighlightText; }
 .head .count { margin-left:auto; font-size:.74rem; color:GrayText;
 	white-space:nowrap; font-variant-numeric:tabular-nums; }
 
@@ -1076,9 +1115,89 @@ function build(w) {
 	doc.body.replaceChildren();
 
 	const head = el(doc, "div", "head");
+	// The feed name doubles as the scope control: it already says which feed you
+	// are in, so it is the obvious place to change it.
 	const feedName = el(doc, "span", "feed");
+	feedName.title = "Switch feed";
 	const count = el(doc, "span", "count");
 	head.append(feedName, count);
+	let menu = null; // the feed picker, when open
+
+	const closeFeeds = () => {
+		if (!menu) return;
+		safe(() => doc.removeEventListener("mousedown", menu._onDown, true));
+		menu.remove();
+		menu = null;
+		w.focus();
+	};
+
+	const openFeeds = () => {
+		if (menu) return closeFeeds();
+		const rows = feedRows();
+		if (rows.length < 2) return flash("No feeds");
+		menu = el(doc, "div", "feedpick");
+		const input = doc.createElement("input");
+		input.type = "text";
+		input.placeholder = "Search feeds…";
+		const drop = el(doc, "div", "drop");
+		menu.append(input, drop);
+		head.append(menu);
+
+		let shown = rows;
+		// Opens on whichever feed you are already riffling.
+		let sel = Math.max(0, rows.findIndex((r) => r.id === scopeLib));
+
+		const paint = () => {
+			drop.replaceChildren();
+			if (!shown.length) {
+				drop.append(el(doc, "div", "none", "No matching feed"));
+				return;
+			}
+			shown.forEach((r, i) => {
+				const row = el(doc, "div", i === sel ? "on" : null);
+				row.append(el(doc, "span", null, r.name), el(doc, "b", null, String(r.n)));
+				row.addEventListener("mousedown", (e) => { e.preventDefault(); sel = i; choose(); });
+				drop.append(row);
+			});
+			const on = drop.querySelector(".on");
+			if (on) on.scrollIntoView({ block: "nearest" });
+		};
+
+		const choose = () => {
+			const r = shown[sel];
+			closeFeeds();
+			if (!r || r.id === scopeLib) return;
+			scopeLib = r.id;
+			reload().catch(oops);
+		};
+
+		menu.addEventListener("keydown", (e) => {
+			if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); return closeFeeds(); }
+			if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); return choose(); }
+			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+				e.preventDefault(); e.stopPropagation();
+				if (!shown.length) return;
+				sel = (sel + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length;
+				return paint();
+			}
+			e.stopPropagation(); // ordinary typing stays in the box
+		});
+		input.addEventListener("input", () => {
+			shown = rank(input.value, rows, (r) => r.name);
+			sel = 0;
+			paint();
+		});
+		// Clicking anywhere else dismisses it, the way a menu should.
+		menu._onDown = (e) => {
+			if (!menu.contains(e.target) && e.target !== feedName) closeFeeds();
+		};
+		doc.addEventListener("mousedown", menu._onDown, true);
+
+		paint();
+		input.focus();
+	};
+
+	feedName.addEventListener("click", openFeeds);
 
 	const cardBox = el(doc, "div", "card");
 	// Links open in the real browser: this window is the riffle UI, and
@@ -1126,8 +1245,8 @@ function build(w) {
 	};
 
 	const cardHints = () => hint([
-		["←", "discard"], ["→", "keep"], ["u", "undo"], ["o", "open"],
-		["↑↓", "scroll"], ["+/−", "size"], ["Esc", "close"],
+		["←", "discard"], ["→", "keep"], ["u", "undo"], ["f", "feed"],
+		["o", "open"], ["↑↓", "scroll"], ["+/−", "size"], ["Esc", "close"],
 	]);
 
 	// --- the card ---------------------------------------------------------
@@ -1504,7 +1623,7 @@ function build(w) {
 	// reinstall the new sandbox still has to be able to unhook the old one.
 	safe(() => { if (w._riffleKey) doc.removeEventListener("keydown", w._riffleKey); });
 	const keyHandler = (e) => {
-		if (panel) return; // the panel handled anything it wanted
+		if (panel || menu) return; // the panel or feed picker handled it
 		if (e.metaKey || e.ctrlKey) {
 			if (e.key === "z") { e.preventDefault(); doUndo(); }
 			// The shortcut every reader tries first.
@@ -1521,6 +1640,7 @@ function build(w) {
 			case "-": case "_": e.preventDefault(); setScale(fontScale - SIZE_STEP); break;
 			case "0": e.preventDefault(); setScale(1); break;
 			case "o": e.preventDefault(); openURL(); break;
+			case "f": e.preventDefault(); openFeeds(); break;
 			case "r": if (cursor >= ids.length) { e.preventDefault(); reload().catch(oops); } break;
 			case "Escape": e.preventDefault(); w.close(); break;
 			case "ArrowDown": e.preventDefault(); cardBox.scrollBy({ top: 60 }); break;
