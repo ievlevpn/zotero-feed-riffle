@@ -49,9 +49,9 @@ let total = 0;         // ids.length when the window opened, for the counter
 const cache = new Map(); // itemID → Zotero.Item, filled a window at a time
 let colls = [];        // [{ id, path }] every collection you can file into
 let allTags = [];      // every tag name in the library, for the tag picker
-let undoStack = [];    // {feedItem, itemID} — itemID null for a plain discard
+let undoStack = [];    // {id, revert} — revert absent for a discard or a skip
 let scopeLib = null;   // feed libraryID to riffle, or null for every feed
-let libKeys = new Set(); // DOI/arXiv keys already in the library, for the badge
+let libKeys = new Map(); // DOI/arXiv key → the { id, colls } already in the library
 const RIFFLE_ATTR = "data-feed-riffle"; // marks our window, across installs
 let fontScale = 1;     // multiplier on top of Zotero's font size, persisted
 
@@ -205,6 +205,36 @@ function refKeys(doi, url) {
 		}
 	}
 	return out;
+}
+
+// One row per (item, field value, collection), so an item shows up once per
+// collection it is in and once per DOI/URL it carries, each row repeating that
+// item's note and annotation counts. Fold that into one entry per item,
+// reachable by any of its keys. Exported for test.js.
+function foldLibraryRows(rows) {
+	const byItem = new Map();
+	const keys = new Map();
+	for (const r of rows) {
+		let entry = byItem.get(r.itemID);
+		if (!entry) {
+			byItem.set(r.itemID, entry = { id: r.itemID, colls: new Set(),
+				notes: r.notes || 0, annots: r.annots || 0 });
+		}
+		if (r.collectionID) entry.colls.add(r.collectionID);
+		// ponytail: if the library already holds two copies of one DOI, the last
+		// one wins. Zotero's Duplicate Items pane is where that gets sorted out.
+		for (const k of refKeys(null, r.value)) keys.set(k, entry);
+	}
+	return keys;
+}
+
+// "2 notes and 14 annotations" — what the old copy is worth keeping for, and
+// the whole of what the question about it can tell you. Exported for test.js.
+function heldPhrase(notes, annots) {
+	const bits = [];
+	if (notes) bits.push(notes + (notes === 1 ? " note" : " notes"));
+	if (annots) bits.push(annots + (annots === 1 ? " annotation" : " annotations"));
+	return bits.join(" and ") || "nothing of yours";
 }
 
 // arXiv puts a routing header on every abstract:
@@ -640,19 +670,42 @@ function flatCollections() {
 	return out;
 }
 
-// Every DOI and URL already in the library, as keys. A few thousand rows, so it
-// is read once and matched in memory rather than queried per card.
+// Every DOI and URL already in the library, keyed the way a feed card is, and
+// carrying the collections that copy sits in — those are the collections worth
+// offering first when the card turns out to be something you already have. A
+// few thousand rows, so it is read once and matched in memory rather than
+// queried per card.
 async function loadLibraryKeys() {
-	const sql = "SELECT v.value FROM itemData d "
+	const sql = "SELECT i.itemID AS itemID, v.value AS value, ci.collectionID AS collectionID, "
+		// What the old copy is worth keeping for, if a revision turns up.
+		+ "(SELECT COUNT(*) FROM itemNotes n WHERE n.parentItemID = i.itemID "
+		+ "AND n.itemID NOT IN (SELECT itemID FROM deletedItems)) AS notes, "
+		+ "(SELECT COUNT(*) FROM itemAnnotations an "
+		+ "JOIN itemAttachments ia ON ia.itemID = an.parentItemID "
+		+ "WHERE ia.parentItemID = i.itemID "
+		+ "AND an.itemID NOT IN (SELECT itemID FROM deletedItems)) AS annots "
+		+ "FROM itemData d "
 		+ "JOIN itemDataValues v ON v.valueID = d.valueID "
 		+ "JOIN items i ON i.itemID = d.itemID "
+		+ "LEFT JOIN collectionItems ci ON ci.itemID = i.itemID "
 		+ "WHERE d.fieldID IN (SELECT fieldID FROM fields WHERE fieldName IN ('DOI','url')) "
+		// A PDF attachment carries the paper's own URL in itemData, so without
+		// this the attachment wins the key: nothing to hoist (a child item is in
+		// no collection) and filing would try to put a collection on the PDF.
+		+ "AND i.itemTypeID NOT IN (SELECT itemTypeID FROM itemTypes "
+		+ "WHERE typeName IN ('attachment','note','annotation')) "
 		+ "AND i.libraryID NOT IN (SELECT libraryID FROM feeds) "
 		+ "AND i.itemID NOT IN (SELECT itemID FROM deletedItems)";
-	const rows = (await Zotero.DB.columnQueryAsync(sql)) || [];
-	const set = new Set();
-	for (const v of rows) for (const k of refKeys(null, v)) set.add(k);
-	return set;
+	return foldLibraryRows((await Zotero.DB.queryAsync(sql)) || []);
+}
+
+// The library copy this card is a second announcement of, if there is one.
+function libraryCopy(feedItem) {
+	for (const k of refKeys(feedItem.getField("DOI"), feedItem.getField("url"))) {
+		const hit = libKeys.get(k);
+		if (hit) return hit;
+	}
+	return null;
 }
 
 // Collections you have filed into lately, most recent first — the ones the
@@ -683,20 +736,23 @@ async function loadTags() {
 // what you did here and Zotero's feed cleanup reaps the item on its own clock.
 async function discard(item) {
 	await item.toggleRead(true);
-	undoStack.push({ id: item.id, itemID: null });
+	undoStack.push({ id: item.id });
 }
 
 // A local clone, not FeedItem#translate(). translate() loads the page in a
 // hidden browser and runs translators — seconds per item, and a progress
 // popup — which is exactly the clunkiness this plugin exists to avoid. The
 // feed entry already carries title, authors, date, abstract, DOI and URL.
-// ponytail: no snapshot and no translator-grade metadata. Zotero's own
-// "Add to My Library" is still there for the handful that deserve it.
-async function keep(feedItem, collectionID, tags, note) {
+// ponytail: the PDF comes from the find-file resolvers below, but there is
+// no web snapshot and no translator-grade metadata. Zotero's own "Add to My
+// Library" is still there for the handful that deserve it.
+async function keep(feedItem, collectionID, tags, note, dropOld) {
 	const collection = Zotero.Collections.get(collectionID);
 	// The picker was built from a snapshot; the collection can be gone by now.
 	if (!collection) throw new Error("that collection no longer exists");
 	const libraryID = collection.libraryID;
+	const copy = libraryCopy(feedItem);
+
 	// Zotero.FeedItem#clone saves immediately and hands back a plain summary
 	// object, so go to the base implementation: it returns an unsaved item and
 	// lets the tags go on before the first write.
@@ -704,6 +760,32 @@ async function keep(feedItem, collectionID, tags, note) {
 	item.addToCollection(collectionID);
 	for (const t of tags) item.addTag(t);
 	await item.saveTx();
+
+	// The PDF, by Zotero's own "Find Available PDF" route: the DOI and the
+	// landing page, no hidden browser and no translator run. Deliberately not
+	// awaited — the card has already flicked away and the file can land a few
+	// seconds later. arXiv abs pages carry a citation_pdf_url, so the URL
+	// resolver finds them without a DOI.
+	// ponytail: no retry and no progress UI. Failures go to the error console.
+	let filePromise = null;
+	if (safe(() => Zotero.Libraries.get(libraryID).filesEditable, false)
+		&& safe(() => Zotero.Attachments.canFindFileForItem(item), false)) {
+		filePromise = Zotero.Attachments.addAvailableFile(item);
+		filePromise.catch(oops);
+	}
+
+	// The copy you already had, when you said to let it go. Zotero's trash, not
+	// erased: it keeps everything it held, undo brings it straight back, and
+	// Zotero empties the trash on its own schedule if you never look again.
+	let trashed = null;
+	if (dropOld && copy) {
+		const old = await Zotero.Items.getAsync(copy.id);
+		if (old) {
+			old.deleted = true;
+			await old.saveTx();
+			trashed = old;
+		}
+	}
 
 	if (note) {
 		const n = new Zotero.Item("note");
@@ -718,7 +800,30 @@ async function keep(feedItem, collectionID, tags, note) {
 	await feedItem.toggleRead(true);
 	Zotero.Prefs.set(LAST_PREF, String(collectionID));
 	pushRecent(collectionID);
-	undoStack.push({ id: feedItem.id, itemID: item.id });
+
+	// The map is loaded once per reload, so keep it current as you file: a
+	// cross-listed paper turns up twice in one sitting often enough, and the
+	// newest copy is the one a second card should be pointed at.
+	const keys = refKeys(item.getField("DOI"), item.getField("url"));
+	const entry = { id: item.id, colls: new Set([collectionID]), notes: 0, annots: 0 };
+	for (const k of keys) libKeys.set(k, entry);
+
+	// Only this filing knows what it did, so it hands undo the way back.
+	undoStack.push({
+		id: feedItem.id,
+		revert: async () => {
+			// The download may still be in flight; take it back when it lands.
+			if (filePromise) filePromise.then((att) => att && att.eraseTx()).catch(oops);
+			const it = await Zotero.Items.getAsync(item.id);
+			if (it) await it.eraseTx(); // takes the note and the PDF with it
+			if (trashed) {
+				trashed.deleted = false;
+				await trashed.saveTx();
+			}
+			for (const k of keys) { if (copy) libKeys.set(k, copy); else libKeys.delete(k); }
+		},
+	});
+	return !!trashed;
 }
 
 // One key on a keyboard-driven interface is one item gone from view, and at
@@ -726,10 +831,7 @@ async function keep(feedItem, collectionID, tags, note) {
 async function undo() {
 	const last = undoStack.pop();
 	if (!last) return null;
-	if (last.itemID) {
-		const saved = await Zotero.Items.getAsync(last.itemID);
-		if (saved) await saved.eraseTx();
-	}
+	if (last.revert) await last.revert();
 	const feedItem = await Zotero.Items.getAsync(last.id);
 	if (feedItem) {
 		await feedItem.toggleRead(false);
@@ -946,6 +1048,14 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
  * you keep reading the description while you decide where it goes. */
 .file { border-top:1px solid color-mix(in srgb, Highlight 55%, Canvas);
 	background:color-mix(in srgb, Highlight 8%, Canvas); padding:.65rem 1.1rem .6rem; }
+/* The question about the old copy: a list you answer, not a popup that hangs
+ * over the row above it. */
+.ask .drop { position:static; margin:.45rem 0 0 3.8rem; max-height:none;
+	box-shadow:none; }
+.ask:focus { outline:none; }
+/* Said where the filing happens, not only on the card. */
+.file .dupe { font-size:.74rem; margin:.4rem 0 0 3.8rem;
+	color:color-mix(in srgb, Highlight 80%, CanvasText); }
 .row { display:flex; align-items:center; gap:.6rem; margin-bottom:.45rem;
 	position:relative; }
 .row:last-of-type { margin-bottom:0; }
@@ -1523,10 +1633,10 @@ function build(w) {
 		if (when) meta.append(el(doc, "span", "when", when));
 		if (kind) meta.append(el(doc, "span", "badge " + kind, kind));
 		// Matched on DOI or arXiv id, so a v2 announcement finds the v1 you
-		// already saved. Worth knowing before you file a second copy.
-		if (refKeys(item.getField("DOI"), item.getField("url")).some((k) => libKeys.has(k))) {
+		// already saved. Worth knowing before you decide what to do with it.
+		if (libraryCopy(item)) {
 			const have = el(doc, "span", "badge have", "in library");
-			have.title = "A copy of this is already in your library";
+			have.title = "Filing this adds the copy you already have to the collection";
 			meta.append(have);
 		}
 		if (meta.childNodes.length) cardBox.append(meta);
@@ -1596,7 +1706,7 @@ function build(w) {
 		// Nothing to undo about a skip, but it still takes a place on the stack:
 		// without one, u would un-read an older item while stepping back to this
 		// card. toggleRead(false) on an item that was never read is a no-op.
-		undoStack.push({ id: item.id, itemID: null, skip: true });
+		undoStack.push({ id: item.id, skip: true });
 		skipped++;
 		advance();
 	};
@@ -1645,22 +1755,100 @@ function build(w) {
 
 	// --- the filing panel --------------------------------------------------
 
-	// Built once per right-arrow and thrown away on Escape or save. Three rows,
-	// revealed one Tab at a time: collection, then tags, then a note. Enter
-	// files the item from wherever you are.
 	function openPanel() {
 		const item = current();
 		if (!item || panel || busy) return;
 		if (!colls.length) return flash("No collections to file into");
+		const copy = libraryCopy(item);
+		// Filing a paper you already have leaves you with two records, and only
+		// you know whether the old one is worth anything. A hidden toggle would
+		// never be found, so it is a question you answer before the picker opens.
+		if (copy) return askOld(item, copy);
+		filer(item, null, false);
+	}
 
+	// "You already have this. What happens to the copy you have?"
+	function askOld(item, copy) {
+		panel = el(doc, "div", "file ask");
+		panel.tabIndex = -1; // so the keys land here and not on the card
+		doc.body.insertBefore(panel, bar);
+		const held = heldPhrase(copy.notes, copy.annots);
+		panel.append(el(doc, "div", "dupe",
+			"Already in your library. The copy you have holds " + held
+			+ ", and filing this announcement makes a second item."));
+
+		const choices = [
+			{ label: "Keep both — file the new version alongside", drop: false },
+			{ label: "Trash the old one — it holds " + held, drop: true },
+		];
+		let sel = 0;
+		const drop = el(doc, "div", "drop");
+		const paint = () => {
+			drop.replaceChildren();
+			choices.forEach((c, i) => {
+				const row = el(doc, "div", i === sel ? "on" : null);
+				row.append(el(doc, "span", null, c.label));
+				row.addEventListener("mousedown", (e) => {
+					e.preventDefault();
+					sel = i;
+					choose();
+				});
+				drop.append(row);
+			});
+		};
+		const choose = () => {
+			const c = choices[sel];
+			panel.remove();
+			panel = null;
+			filer(item, copy, c.drop);
+		};
+		panel.addEventListener("keydown", (e) => {
+			e.stopPropagation();
+			if (e.key === "Escape") {
+				e.preventDefault();
+				panel.remove();
+				panel = null;
+				cardHints();
+				w.focus();
+				return;
+			}
+			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+				e.preventDefault();
+				sel = (sel + (e.key === "ArrowDown" ? 1 : -1) + choices.length) % choices.length;
+				return paint();
+			}
+			if (e.key === "Enter") { e.preventDefault(); return choose(); }
+		});
+		panel.append(drop);
+		paint();
+		panel.focus();
+		hint([["↑↓", "pick"], ["⏎", "choose"], ["Esc", "back"]]);
+	}
+
+	// Built once per right-arrow and thrown away on Escape or save. Three rows,
+	// revealed one Tab at a time: collection, then tags, then a note. Enter
+	// files the item from wherever you are.
+	function filer(item, copy, dropOld) {
 		panel = el(doc, "div", "file");
 		doc.body.insertBefore(panel, bar);
+
+		const already = copy ? copy.colls : new Set();
+		// A reminder of what you just chose, where you can still change your
+		// mind with Escape.
+		const dupeLine = copy ? el(doc, "div", "dupe", dropOld
+			? "The old item (" + heldPhrase(copy.notes, copy.annots)
+				+ ") goes to the trash when this is filed."
+			: "Keeping the old item (" + heldPhrase(copy.notes, copy.annots)
+				+ ") — this files a second one.") : null;
 
 		// Last collection first, so Enter alone repeats the previous filing.
 		// Recents first, most recent first — so Enter still repeats the last
 		// filing, and the rows the number keys reach are the rows on top.
+		// Where the copy already sits comes first of all: that is the shelf it
+		// belongs on, and seeing it saves you filing it somewhere it is already.
 		const recent = recentIDs();
 		const place = (c) => {
+			if (already.has(c.id)) return -1;
 			const i = recent.indexOf(c.id);
 			return i < 0 ? recent.length : i;
 		};
@@ -1678,6 +1866,9 @@ function build(w) {
 		const cDrop = el(doc, "div", "drop");
 		cRow.append(cIn, cDrop);
 		panel.append(cRow);
+		// Under the input, not over it: the dropdown opens upward and would
+		// cover anything above the row.
+		if (dupeLine) panel.append(dupeLine);
 
 		let shown = [];
 		let sel = 0;
@@ -1692,8 +1883,11 @@ function build(w) {
 			shown.forEach((c, i) => {
 				const row = el(doc, "div", i === sel ? "on" : null);
 				row.append(el(doc, "span", null, c.path));
-				// Only while unfiltered, when row order and key order agree.
-				if (numbered && i < recent.length) row.append(el(doc, "b", null, String(i + 1)));
+				if (already.has(c.id)) row.append(el(doc, "b", null, "already in"));
+				// By recent position, not row position: the copy's own
+				// collections are hoisted above them.
+				const n = numbered ? recent.indexOf(c.id) : -1;
+				if (n >= 0) row.append(el(doc, "b", null, String(n + 1)));
 				row.addEventListener("mousedown", (e) => {
 					e.preventDefault();
 					sel = i;
@@ -1789,7 +1983,8 @@ function build(w) {
 
 		const panelHints = () => {
 			if (stage === 0) {
-				hint([["⏎", "file here"], ["⇥", "add tags"], ["↑↓", "pick"], ["Esc", "back"]]);
+				hint([["⏎", "file here"], ["⇥", "add tags"], ["↑↓", "pick"],
+					["Esc", "back"]]);
 			} else if (stage === 1) {
 				hint([["⏎", tIn.value.trim() ? "add tag" : "file"], ["⇥", "add note"],
 					["⇧⇥", "back"], ["Esc", "cancel"]]);
@@ -1824,8 +2019,11 @@ function build(w) {
 			const feedItem = item;
 			closePanel();
 			flick("right");
-			guard(keep(feedItem, c.id, finalTags, nIn.value.trim())
-				.then(() => { flash("→ " + c.path); advance(""); }))
+			guard(keep(feedItem, c.id, finalTags, nIn.value.trim(), dropOld)
+				.then((dropped) => {
+					flash("→ " + c.path + (dropped ? " (old one trashed)" : ""));
+					advance("");
+				}))
 				.catch((e) => { oops(e); flash("Save failed — see the error console"); });
 		}
 
@@ -1994,5 +2192,6 @@ function uninstall() {}
 if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
-		looksLikeMath, normalizeColor, refKeys, markClassMath };
+		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
+		heldPhrase };
 }

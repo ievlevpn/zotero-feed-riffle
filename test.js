@@ -1,6 +1,7 @@
 // Self-check: node test.js  (exits non-zero on failure)
 const assert = require("assert");
-const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags } = require("./bootstrap.js");
+const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
+	foldLibraryRows, heldPhrase } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -223,3 +224,33 @@ assert.strictEqual(mark("$x$"), "$x$", "content that already has delimiters is l
 assert.strictEqual(mark("   "), "   ", "blank content is left alone");
 
 console.log("ok");
+
+// --- foldLibraryRows: the library index the "in library" badge and the ------
+// filing panel both read. One row per (item, value, collection).
+const idx = foldLibraryRows([
+	{ itemID: 7, value: "10.1000/Xyz", collectionID: 3, notes: 2, annots: 14 },
+	{ itemID: 7, value: "10.1000/Xyz", collectionID: 4, notes: 2, annots: 14 },
+	{ itemID: 7, value: "https://arxiv.org/abs/2604.04661v1", collectionID: 3, notes: 2, annots: 14 },
+	{ itemID: 7, value: "https://arxiv.org/abs/2604.04661v1", collectionID: 4, notes: 2, annots: 14 },
+	{ itemID: 9, value: "https://example.org/paper", collectionID: null, notes: 0, annots: 0 },
+]);
+assert.strictEqual(idx.get("doi:10.1000/xyz").id, 7);
+assert.strictEqual(idx.get("arxiv:2604.04661"), idx.get("doi:10.1000/xyz"),
+	"every key of one item points at the same entry");
+assert.deepStrictEqual([...idx.get("doi:10.1000/xyz").colls].sort(), [3, 4],
+	"collections gathered across rows, not overwritten");
+assert.deepStrictEqual([...idx.get("url:example.org/paper").colls], [],
+	"an item in no collection still gets an entry (LEFT JOIN gives null)");
+assert.strictEqual(idx.get("doi:10.1000/nope"), undefined);
+assert.deepStrictEqual(
+	[idx.get("doi:10.1000/xyz").notes, idx.get("doi:10.1000/xyz").annots], [2, 14],
+	"the counts the panel asks about, repeated on every row, counted once");
+assert.deepStrictEqual(
+	[idx.get("url:example.org/paper").notes, idx.get("url:example.org/paper").annots], [0, 0]);
+
+// --- heldPhrase: the whole of what the question about the old copy says ----
+assert.strictEqual(heldPhrase(2, 14), "2 notes and 14 annotations");
+assert.strictEqual(heldPhrase(1, 1), "1 note and 1 annotation", "singulars");
+assert.strictEqual(heldPhrase(0, 3), "3 annotations", "no empty half");
+assert.strictEqual(heldPhrase(0, 0), "nothing of yours",
+	"the case where trashing it is the obvious answer");

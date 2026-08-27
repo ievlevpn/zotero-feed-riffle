@@ -49,7 +49,15 @@ see which is which.
 
 A card whose DOI or arXiv id is already in your library is marked **in library**.
 The version suffix is ignored, so a `replace` announcement finds the copy you
-saved months ago instead of quietly making a second one.
+saved months ago. Filing still makes a second item — the new version is a new
+record — so the panel asks what to do with the old one and tells you what it is
+worth: *"Already in your library — filing adds a second item. The old one holds
+2 notes and 14 annotations. Ctrl+D trashes it."* <kbd>Ctrl</kbd>+<kbd>D</kbd>
+toggles; the default is to keep both. Trashing means Zotero's trash, so nothing
+is destroyed and <kbd>u</kbd> puts it straight back.
+
+The collections the old copy is in are hoisted to the top of the picker, marked
+*already in* — usually where the new version belongs too.
 
 When a feed runs out, the finish screen lists the feeds that still have unread
 items, with their counts — <kbd>Enter</kbd> carries straight on into the top one.
@@ -91,9 +99,12 @@ this plugin does needs undoing if you uninstall it.
 **not** run `translate()` the way *Add to My Library* does: that loads the page
 in a hidden browser and runs a translator, which takes seconds per item and is
 precisely the friction this plugin exists to remove. You get the feed's own
-metadata — title, authors, date, abstract, DOI, URL — and no snapshot. For the
-handful of papers that deserve full metadata, Zotero's own *Add to My Library*
-is still right there.
+metadata — title, authors, date, abstract, DOI, URL — and no web snapshot. The
+PDF *does* follow: the item goes through the same resolvers as Zotero's *Find
+Available PDF* (the DOI, then the landing page — an arXiv abstract page
+advertises its PDF, so no DOI is needed), in the background, after the card has
+already flicked away. For the handful of papers that deserve full metadata,
+Zotero's own *Add to My Library* is still right there.
 
 ## Reading what the feeds actually send
 
