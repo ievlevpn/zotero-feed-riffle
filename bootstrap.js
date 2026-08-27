@@ -869,11 +869,17 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 
 /* Exit: the card you acted on leaves the way you sent it. A clone, so render()
  * goes on replacing the live card wholesale with no transition bookkeeping. */
-.ghost { position:fixed; z-index:5; pointer-events:none; overflow:hidden; }
-@keyframes outLeft  { to { opacity:0; transform:translateX(-46px); } }
-@keyframes outRight { to { opacity:0; transform:translateX(46px); } }
-.ghost.out-left  { animation:outLeft .17s ease-in forwards; }
-.ghost.out-right { animation:outRight .17s ease-in forwards; }
+/* Opaque, or the card underneath shows straight through the one leaving and
+ * you read two abstracts at once. */
+.ghost { position:fixed; z-index:5; pointer-events:none; overflow:hidden;
+	background:Canvas; }
+/* No fade. Fading it would dim its background too, so for the whole trip you
+ * would be reading the outgoing abstract through the incoming one. Opaque and
+ * travelling clear of the frame, it wipes away and reveals the next card. */
+@keyframes outLeft  { to { transform:translateX(-105%); } }
+@keyframes outRight { to { transform:translateX(105%); } }
+.ghost.out-left  { animation:outLeft .18s cubic-bezier(.35,0,.9,1) forwards; }
+.ghost.out-right { animation:outRight .18s cubic-bezier(.35,0,.9,1) forwards; }
 
 /* 3. A long description that continues past the fold says so, instead of
  * looking exactly like one that has ended. */
@@ -1468,13 +1474,15 @@ function build(w) {
 
 	// --- moving through the deck ------------------------------------------
 
-	const advance = () => { dir = "from-right"; cursor++; render(); };
+	// entry: "" when a card is flying off, since the next one is simply revealed
+	// underneath. Skip and undo have no ghost, so they get a slide of their own.
+	const advance = (entry) => { dir = entry === undefined ? "from-right" : entry; cursor++; render(); };
 
 	const doDiscard = () => {
 		const item = current();
 		if (!item || busy) return;
 		flick("left");
-		guard(discard(item).then(advance)).catch(oops);
+		guard(discard(item).then(() => advance(""))).catch(oops);
 	};
 
 	// Most items go to a handful of places, so the handful get a number each.
@@ -1487,7 +1495,7 @@ function build(w) {
 		const path = (colls.find((c) => c.id === id) || {}).path;
 		if (!path) return flash("That collection is gone");
 		flick("right");
-		guard(keep(item, id, [], "").then(() => { flash("→ " + path); advance(); }))
+		guard(keep(item, id, [], "").then(() => { flash("→ " + path); advance(""); }))
 			.catch((e) => { oops(e); flash("Save failed — see the error console"); });
 	};
 
@@ -1718,7 +1726,7 @@ function build(w) {
 			closePanel();
 			flick("right");
 			guard(keep(feedItem, c.id, finalTags, nIn.value.trim())
-				.then(() => { flash("→ " + c.path); advance(); }))
+				.then(() => { flash("→ " + c.path); advance(""); }))
 				.catch((e) => { oops(e); flash("Save failed — see the error console"); });
 		}
 
