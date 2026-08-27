@@ -19,6 +19,7 @@ const SIZE_PREF = "feedRiffle.fontScale";      // your own +/- adjustment
 const BASE_PX = 15;   // reading size at scale 1, before Zotero's own setting
 const SIZE_MIN = 0.7, SIZE_MAX = 2.4, SIZE_STEP = 0.08;
 const AHEAD = 25;   // items hydrated ahead of the cursor
+const BEHIND = 50;  // and kept behind it, so undo does not have to refetch
 // A formula longer than this is not a formula: a delimiter was mis-detected and
 // the run has swallowed prose. Setting a paragraph as one equation reads far
 // worse than leaving it as the text it is.
@@ -37,7 +38,7 @@ let colls = [];        // [{ id, path }] every collection you can file into
 let allTags = [];      // every tag name in the library, for the tag picker
 let undoStack = [];    // {feedItem, itemID} — itemID null for a plain discard
 let scopeLib = null;   // feed libraryID to riffle, or null for every feed
-let keyHandler = null; // the document listener, so rebuilding replaces it
+const RIFFLE_ATTR = "data-feed-riffle"; // marks our window, across installs
 let fontScale = 1;     // multiplier on top of Zotero's font size, persisted
 
 const oops = (e) => Zotero.logError(e);
@@ -503,7 +504,17 @@ async function loadIDs(libraryID) {
 
 // Keep a window of items loaded around the cursor. Called on every advance;
 // the ones already in `cache` cost nothing.
+// Items outside the window around the cursor are dropped. Without this,
+// riffling a 2,000-item backlog ends with every item ever shown still loaded —
+// the sliding window was doing the fetching but none of the forgetting.
+function evict(from) {
+	if (cache.size <= AHEAD + BEHIND) return;
+	const keep = new Set(ids.slice(Math.max(0, from - BEHIND), from + AHEAD));
+	for (const id of cache.keys()) if (!keep.has(id)) cache.delete(id);
+}
+
 async function hydrate(from) {
+	evict(from);
 	const want = ids.slice(from, from + AHEAD).filter((id) => !cache.has(id));
 	if (!want.length) return;
 	const items = await Zotero.Items.getAsync(want);
@@ -561,6 +572,8 @@ async function discard(item) {
 // "Add to My Library" is still there for the handful that deserve it.
 async function keep(feedItem, collectionID, tags, note) {
 	const collection = Zotero.Collections.get(collectionID);
+	// The picker was built from a snapshot; the collection can be gone by now.
+	if (!collection) throw new Error("that collection no longer exists");
 	const libraryID = collection.libraryID;
 	// Zotero.FeedItem#clone saves immediately and hands back a plain summary
 	// object, so go to the base implementation: it returns an unsaved item and
@@ -597,6 +610,9 @@ async function undo() {
 	const feedItem = await Zotero.Items.getAsync(last.id);
 	if (feedItem) {
 		await feedItem.toggleRead(false);
+		// getAsync alone carries primary data. Caching that as-is meant the card
+		// undo stepped back to threw in getField() — the same trap as hydrate's.
+		await Zotero.Items.loadDataTypes([feedItem], ["itemData", "creators", "tags"]);
 		cache.set(feedItem.id, feedItem);
 	}
 	return true;
@@ -927,6 +943,24 @@ function abstractNode(doc, raw, baseURL) {
 }
 
 
+// A riffle window outlives the plugin that opened it. Its listeners are bound
+// to a sandbox that no longer exists, so every keypress in it throws — and
+// openDialog reuses a window by name rather than replacing it, so the next
+// install inherits the wreck instead of a clean window. Close them on the way in.
+function closeOrphanWindows() {
+	safe(() => {
+		const e = Services.wm.getEnumerator(null);
+		while (e.hasMoreElements()) {
+			const w = e.getNext();
+			if (w === win) continue;
+			safe(() => {
+				const root = w.document && w.document.documentElement;
+				if (root && root.hasAttribute(RIFFLE_ATTR)) w.close();
+			});
+		}
+	});
+}
+
 function open(libraryID) {
 	const main = Zotero.getMainWindow();
 	if (!main) return;
@@ -937,11 +971,17 @@ function open(libraryID) {
 	}
 	// about:blank rather than a packaged XHTML: opened from a chrome window it
 	// inherits chrome privileges, and the whole document is built here anyway.
+	// Before opening: anything still around under our name belongs to a previous
+	// install and would be reused rather than replaced.
+	closeOrphanWindows();
 	win = main.openDialog("about:blank", "feed-riffle", features(main));
 	if (!win) return;
 	// Only save geometry here. This fires for the *initial* about:blank document
 	// too, when the real one loads — nulling `win` from it killed the load.
-	win.addEventListener("unload", () => safe(() => saveState(win)));
+	// Parked on the window so a later install can unhook this one.
+	safe(() => { if (win._riffleUnload) win.removeEventListener("unload", win._riffleUnload); });
+	win._riffleUnload = () => safe(() => saveState(win));
+	win.addEventListener("unload", win._riffleUnload);
 	const go = () => reload().catch(oops);
 	if (win.document.readyState === "complete") go();
 	else win.addEventListener("load", go, { once: true });
@@ -954,6 +994,9 @@ function open(libraryID) {
 function ensureCSS(w) {
 	const doc = w.document;
 	doc.title = "Feed Riffle";
+	// Marks the window as ours so a later install of this plugin can recognise
+	// one left behind by an earlier one.
+	safe(() => doc.documentElement.setAttribute(RIFFLE_ATTR, "1"));
 	applyFontSize(w);
 	ensureKatexCSS(w);
 	if (!doc.getElementById("riffle-css")) {
@@ -1428,9 +1471,10 @@ function build(w) {
 
 	// build() runs again on reload, so without this the document collects a
 	// handler per build and every copy fires — one arrow press would discard
-	// two items.
-	if (keyHandler) doc.removeEventListener("keydown", keyHandler);
-	keyHandler = (e) => {
+	// two items. Kept on the window rather than in this scope: after a
+	// reinstall the new sandbox still has to be able to unhook the old one.
+	safe(() => { if (w._riffleKey) doc.removeEventListener("keydown", w._riffleKey); });
+	const keyHandler = (e) => {
 		if (panel) return; // the panel handled anything it wanted
 		if (e.metaKey || e.ctrlKey) {
 			if (e.key === "z") { e.preventDefault(); doUndo(); }
@@ -1459,6 +1503,7 @@ function build(w) {
 			default: break;
 		}
 	};
+	w._riffleKey = keyHandler;
 	doc.addEventListener("keydown", keyHandler);
 
 	render();
@@ -1469,6 +1514,7 @@ function build(w) {
 
 function startup({ id, rootURI: uri }) {
 	rootURI = uri;
+	closeOrphanWindows(); // left by a previous install of this plugin
 	loadState();
 	loadScale();
 	menuID = Zotero.MenuManager.registerMenu({
@@ -1504,7 +1550,6 @@ function shutdown() {
 	if (menuID) safe(() => Zotero.MenuManager.unregisterMenu(menuID));
 	if (feedMenuID) safe(() => Zotero.MenuManager.unregisterMenu(feedMenuID));
 	menuID = feedMenuID = null;
-	keyHandler = null;
 	if (win && !win.closed) { safe(() => saveState(win)); safe(() => win.close()); }
 	win = null;
 	ids = [];
