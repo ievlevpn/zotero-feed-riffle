@@ -262,6 +262,12 @@ function mathInto(doc, parent, tex, display) {
 		// friends — this is a feed, and it does not get to inject links.
 		const html = safe(() => katexLib.renderToString(tex, {
 			displayMode: !!display, throwOnError: false, strict: false, trust: false,
+			// Feed maths is written for MathJax, which reads "\color{red}{x}" as
+			// two arguments and tints only x. KaTeX defaults to LaTeX's reading,
+			// where \color is a switch that tints the rest of the group — so one
+			// coloured word bled into the whole line. 18 of the 20 \color uses in
+			// a 2,800-item library are the two-argument form.
+			colorIsTextColor: true,
 		}), null);
 		const frag = html && katexFragment(doc, html);
 		if (frag) { parent.append(frag); return; }
