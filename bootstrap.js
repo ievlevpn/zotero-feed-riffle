@@ -237,33 +237,55 @@ let katexLib = null;   // the library, once loaded
 let katexCSS = null;   // its stylesheet, with the font URLs made absolute
 let katexError = "";   // why it is missing, so a card can say so
 
+// A replaced .xpi keeps its old entry in the platform's zip cache, so the first
+// read out of the new one fails with "Error opening input stream". Reinstalling
+// the same version is when this bites, since nothing else about the file changed.
+// Dropping the stale entry is what the add-on manager itself does after it swaps
+// a file in. Harmless when the plugin is installed from a directory instead.
+function flushPluginCache() {
+	safe(() => {
+		const { interfaces: Ci } = Components;
+		const jar = Services.io.newURI(rootURI)
+			.QueryInterface(Ci.nsIJARURI).JARFile
+			.QueryInterface(Ci.nsIFileURL).file;
+		Services.obs.notifyObservers(jar, "flush-cache-entry");
+	});
+}
+
 async function loadKatex() {
 	if (katexLib || katexError || !rootURI) return;
-	try {
-		// Hand the bundle the CommonJS hooks its UMD header checks for first:
-		// seeing `module` and `exports` as objects, it assigns to module.exports.
-		// That is deterministic. The other branch assigns to `globalThis`, and
-		// under loadSubScript the target object is only on the scope chain — the
-		// global stays whatever compartment the script was compiled in, so the
-		// library would land somewhere we never look.
-		const scope = { module: { exports: {} } };
-		scope.exports = scope.module.exports;
-		Services.scriptloader.loadSubScript(rootURI + "katex.min.js", scope, "UTF-8");
-		const lib = typeof scope.module.exports.renderToString === "function"
-			? scope.module.exports
-			: scope.katex;
-		if (!lib || typeof lib.renderToString !== "function") {
-			throw new Error("katex.min.js ran but exported no renderToString");
+	// Two goes: a first failure is usually the stale cache entry above, and the
+	// read after flushing it succeeds.
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			// Hand the bundle the CommonJS hooks its UMD header checks for
+			// first: seeing `module` and `exports` as objects, it assigns to
+			// module.exports. That is deterministic. The other branch assigns to
+			// `globalThis`, and under loadSubScript the target object is only on
+			// the scope chain — the global stays whatever compartment the script
+			// was compiled in, so the library would land somewhere we never look.
+			const scope = { module: { exports: {} } };
+			scope.exports = scope.module.exports;
+			Services.scriptloader.loadSubScript(rootURI + "katex.min.js", scope, "UTF-8");
+			const lib = typeof scope.module.exports.renderToString === "function"
+				? scope.module.exports
+				: scope.katex;
+			if (!lib || typeof lib.renderToString !== "function") {
+				throw new Error("katex.min.js ran but exported no renderToString");
+			}
+			const css = await Zotero.File.getResourceAsync(rootURI + "katex.min.css");
+			// The stylesheet is inlined, so its relative font URLs would
+			// otherwise resolve against about:blank. Absolute against the
+			// plugin root instead.
+			katexCSS = css.replace(/url\(fonts\//g, "url(" + rootURI + "fonts/");
+			katexLib = lib;
+			return;
 		}
-		const css = await Zotero.File.getResourceAsync(rootURI + "katex.min.css");
-		// The stylesheet is inlined, so its relative font URLs would otherwise
-		// resolve against about:blank. Absolute against the plugin root instead.
-		katexCSS = css.replace(/url\(fonts\//g, "url(" + rootURI + "fonts/");
-		katexLib = lib;
-	}
-	catch (e) {
-		oops(e);
-		katexError = (e && e.message) || String(e);
+		catch (e) {
+			if (attempt === 0) { flushPluginCache(); continue; }
+			oops(e);
+			katexError = (e && e.message) || String(e);
+		}
 	}
 }
 
