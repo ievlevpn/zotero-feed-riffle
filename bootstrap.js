@@ -741,6 +741,9 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	transition:background .12s; }
 .head .feed:hover { background:color-mix(in srgb, GrayText 20%, Canvas); }
 .head .feed::after { content:" ▾"; opacity:.65; }
+/* The done screen clears the name; without this its caret hangs there alone. */
+.head .feed:empty { padding:0; }
+.head .feed:empty::after { content:none; }
 
 /* Anchored under the feed name, and reuses .drop for the list itself. */
 .feedpick { position:absolute; top:calc(100% + .3rem); left:.75rem; z-index:20;
@@ -891,7 +894,13 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 
 .done { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
 	gap:8px; color:GrayText; }
-.done .big { font-size:34px; }
+.done .big { font-size:2.2rem; }
+.done .next { margin-top:1.6rem; width:min(22rem, 80%); }
+.done .nextlabel { font-size:.72rem; letter-spacing:.05em; text-transform:uppercase;
+	color:GrayText; margin-bottom:.35rem; text-align:left; }
+/* The list is the same one the feed picker shows, without the popup around it. */
+.done .drop { position:static; max-height:none; box-shadow:none;
+	border:1px solid color-mix(in srgb, GrayText 35%, Canvas); }
 
 .bar { border-top:1px solid color-mix(in srgb, GrayText 35%, Canvas);
 	padding:.5rem 1.1rem; display:flex; flex-wrap:wrap; gap:.35rem 1rem;
@@ -1296,6 +1305,17 @@ function build(w) {
 	let panel = null;      // the filing panel, or null when just riffling
 	let dir = "from-right"; // which way the last card came in
 	let ghost = null;       // the outgoing card, mid-flight
+	let nextFeeds = [];     // feeds still waiting, offered on the done screen
+	let nextSel = 0;
+	let nextDrop = null;    // that list, so moving the selection need not redraw
+
+	// Moving the selection repaints the rows in place. Going through render()
+	// would re-enter draw(), which rebuilds the list and resets nextSel — so the
+	// selection could never actually move.
+	const paintNext = () => {
+		if (!nextDrop) return;
+		[...nextDrop.children].forEach((row, i) => row.classList.toggle("on", i === nextSel));
+	};
 
 	// The card you just acted on flies off the way you sent it: left for
 	// discard, right for keep. Cloned and thrown away rather than retained, and
@@ -1389,12 +1409,42 @@ function build(w) {
 						+ (skipped ? `, ${skipped} skipped for later.` : ".")
 					: "Nothing unread."),
 			);
+
+			// Reaching the end of one feed is the moment you are most likely to
+			// want another, so the ones still waiting are offered here rather
+			// than left for you to go and find.
+			nextFeeds = feedRows().filter((r) => r.id !== null && r.n > 0 && r.id !== scopeLib);
+			nextSel = 0;
+			nextDrop = null;
+			if (nextFeeds.length) {
+				const box = el(doc, "div", "next");
+				box.append(el(doc, "div", "nextlabel", "Still waiting"));
+				const drop = el(doc, "div", "drop");
+				nextFeeds.forEach((r, i) => {
+					const row = el(doc, "div", i === nextSel ? "on" : null);
+					row.append(el(doc, "span", null, r.name), el(doc, "b", null, String(r.n)));
+					row.addEventListener("mousedown", (e) => {
+						e.preventDefault();
+						nextSel = i;
+						goNext();
+					});
+					drop.append(row);
+				});
+				box.append(drop);
+				done.append(box);
+				nextDrop = drop;
+			}
+
 			cardBox.append(done);
-			hint([["u", "undo"], ["r", "reload"], ["Esc", "close"]]);
+			hint(nextFeeds.length
+				? [["⏎", "next feed"], ["↑↓", "pick"], ["u", "undo"], ["Esc", "close"]]
+				: [["u", "undo"], ["r", "reload"], ["Esc", "close"]]);
 			feedName.textContent = "";
 			count.textContent = "";
 			return;
 		}
+		nextFeeds = [];
+		nextDrop = null;
 
 		const item = current();
 		if (!item) { // hydration hasn't caught up; it will, then re-render
@@ -1536,6 +1586,16 @@ function build(w) {
 		safe(() => Zotero.Prefs.set(SIZE_PREF, String(fontScale)));
 		applyFontSize(w);
 		flash(Math.round(fontScale * 100) + "%");
+	};
+
+	// Carry on into whichever feed is selected on the done screen.
+	const goNext = () => {
+		const r = nextFeeds[nextSel];
+		if (!r) return;
+		nextFeeds = [];
+		nextDrop = null;
+		scopeLib = r.id;
+		reload().catch(oops);
 	};
 
 	const openURL = () => {
@@ -1807,8 +1867,19 @@ function build(w) {
 			case "f": e.preventDefault(); openFeeds(); break;
 			case "r": if (cursor >= ids.length) { e.preventDefault(); reload().catch(oops); } break;
 			case "Escape": e.preventDefault(); w.close(); break;
-			case "ArrowDown": e.preventDefault(); cardBox.scrollBy({ top: 60 }); break;
-			case "ArrowUp": e.preventDefault(); cardBox.scrollBy({ top: -60 }); break;
+			case "Enter":
+				if (nextFeeds.length) { e.preventDefault(); goNext(); }
+				break;
+			case "ArrowDown": case "ArrowUp": {
+				e.preventDefault();
+				const d = e.key === "ArrowDown" ? 1 : -1;
+				if (nextFeeds.length) {
+					nextSel = (nextSel + d + nextFeeds.length) % nextFeeds.length;
+					paintNext();
+				}
+				else cardBox.scrollBy({ top: 60 * d });
+				break;
+			}
 			case " ":
 				e.preventDefault();
 				cardBox.scrollBy({ top: cardBox.clientHeight * (e.shiftKey ? -0.85 : 0.85) });

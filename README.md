@@ -51,6 +51,11 @@ A card whose DOI or arXiv id is already in your library is marked **in library**
 The version suffix is ignored, so a `replace` announcement finds the copy you
 saved months ago instead of quietly making a second one.
 
+When a feed runs out, the finish screen lists the feeds that still have unread
+items, with their counts — <kbd>Enter</kbd> carries straight on into the top one.
+Reaching the end is when you are most likely to want another, so it is offered
+rather than left for you to go and find.
+
 ### Switching feeds
 
 The feed name in the top left is also the scope control: click it, or press
