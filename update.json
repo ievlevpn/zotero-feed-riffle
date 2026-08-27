@@ -1,0 +1,18 @@
+{
+  "addons": {
+    "feed-riffle@local": {
+      "updates": [
+        {
+          "version": "0.1.1",
+          "update_link": "https://github.com/ievlevpn/zotero-feed-riffle/releases/download/v0.1.1/feed-riffle.xpi",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "6.999",
+              "strict_max_version": "10.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
