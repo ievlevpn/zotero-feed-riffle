@@ -1,0 +1,146 @@
+# Feed Riffle
+
+A Zotero 7+ plugin for clearing an RSS feed backlog at speed.
+
+Zotero's feed reader is a three-pane library view: click an item, read it,
+click *Add to My Library*, wait for a translator, pick a collection in a
+dialog. Fine for five items a week. At two thousand unread it is why the
+backlog exists.
+
+Feed Riffle deals the unread items out one card at a time and puts the whole
+decision on the arrow keys.
+
+## Use
+
+**Tools → Riffle Feeds…** for every feed at once, or right-click a feed in the
+collections pane → **Riffle This Feed…** to work through one.
+
+Each card shows the title, authors, date and abstract.
+
+| Key | |
+|---|---|
+| <kbd>←</kbd> | discard — marks it read and moves on |
+| <kbd>→</kbd> | keep — opens the filing panel |
+| <kbd>u</kbd> / <kbd>Ctrl</kbd>+<kbd>Z</kbd> | undo the last discard or save |
+| <kbd>o</kbd> | open the paper in your browser |
+| <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
+| <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> | text bigger, smaller, reset (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> too) |
+| <kbd>Esc</kbd> | close |
+
+### Filing
+
+<kbd>→</kbd> opens a panel already pointed at the collection you used last, so
+<kbd>Enter</kbd> alone files it there. Otherwise type: the box fuzzy-matches
+the full collection path, so `prs` finds *Probability / SPDEs* and
+`paths rough` finds *Probability / Rough paths*.
+
+<kbd>Tab</kbd> instead of <kbd>Enter</kbd> opens a tag box (fuzzy-completing
+your existing tags; <kbd>Enter</kbd> commits a tag, <kbd>Enter</kbd> on an
+empty box files the item). <kbd>Tab</kbd> again opens a note box, where
+<kbd>Enter</kbd> files and <kbd>Shift</kbd>+<kbd>Enter</kbd> makes a newline.
+<kbd>Esc</kbd> steps back one row at a time.
+
+## How it stores things
+
+Nothing of its own, beyond remembering the last collection and the window
+position.
+
+*Discarded* is Zotero's own per-item read flag — the same one the unread
+counts in the collections pane use, and the one Zotero's existing feed cleanup
+reaps items on. So discarding here is exactly discarding there, and nothing
+this plugin does needs undoing if you uninstall it.
+
+*Keeping* clones the feed entry straight into the collection, locally. It does
+**not** run `translate()` the way *Add to My Library* does: that loads the page
+in a hidden browser and runs a translator, which takes seconds per item and is
+precisely the friction this plugin exists to remove. You get the feed's own
+metadata — title, authors, date, abstract, DOI, URL — and no snapshot. For the
+handful of papers that deserve full metadata, Zotero's own *Add to My Library*
+is still right there.
+
+## Reading what the feeds actually send
+
+Feed metadata arrives raw and no two sources format it the same way, so the card
+normalises it before showing you anything.
+
+**Descriptions are rendered, not flattened.** A feed that really sends HTML keeps
+its structure — paragraphs, quotes, lists, headings, links. That HTML is
+untrusted input, so it goes through Gecko's own sanitizer (`nsIParserUtils`, the
+same service Zotero uses for untrusted note and annotation HTML) rather than
+anything hand-written here. Remote media is dropped: an `<img>` in an RSS item is
+as often a tracking pixel as a picture, and a reader should not phone home for
+every card you flick past. Feed stylesheets are dropped too, so the card keeps
+its own typography. Links open in your browser, not in the riffle window.
+
+**Formulas are typeset by KaTeX**, which is bundled with the plugin — the real
+thing, not an approximation: environments, `\left…\right` that stretches to
+what it contains, `\begin{cases}`, author-defined macros, everything a feed's
+LaTeX can hold. All four delimiter styles are understood — `$…$`, `$$…$$`,
+`\(…\)` and `\[…\]` — in titles as well as descriptions. KaTeX loads on first
+use rather than at startup, so a plugin you never open costs nothing.
+
+A `$` only opens math when what follows reads like math. Outside academic feeds
+a dollar sign is usually money, and "raised $5 million and $10 million" must not
+become an equation.
+
+**Text size** starts from Zotero's own font-size setting, so the window matches
+the rest of the app, and <kbd>+</kbd>/<kbd>−</kbd> adjusts from there and
+remembers. Every size in the stylesheet is in `rem`, so one number scales the
+prose, the math and the chrome together rather than drifting apart.
+
+**Prose is set as prose:** `--` becomes an en dash, `` ``quoted'' `` becomes
+curly quotes, and text is held to a readable measure (about 34em, near the 75
+characters past which the eye starts losing the next line) instead of running the
+full width of the window. Descriptions are set in a serif, which is what
+long-form reading wants and what sits with KaTeX\'s Computer Modern — a sans body
+beside serif formulas reads as two documents stapled together. The chrome stays
+in the system UI font, because it is UI. Hyphenation is on, using the item\'s own
+language field, since at this measure it takes the worst of the rag out. Author names are de-LaTeXed (`Bu\v{s}i\'{c}` → `Bušić`),
+and common feed boilerplate is dropped — arXiv's `Announce Type:` header becomes
+a small badge, so a revision reads differently from a new paper at a glance.
+
+### When the importer has already broken it
+
+Zotero HTML-parses every feed abstract before storing it, so what a plugin reads
+back is always serialised HTML — including for feeds that sent plain text. That
+has one destructive consequence: a `<` in math (`$i<j$`) is read as a tag, and
+the words after it are stored as its attributes.
+
+So the description is handed to the platform's parser and the resulting tree
+decides what the source was. Contains block elements: the feed really sent HTML.
+Contains none: it was prose all along, and every element found in it is damage —
+so each is serialised back into the characters it was made from, the exact
+inverse of what the importer did. Not all of it returns, because HTML lowercases
+attribute names and silently drops duplicates, so a word repeated inside the
+damaged span is gone for good.
+
+This needs a literal `<` in a plain-text feed, so it is rare — but arXiv math
+hits it, and undoing it beats displaying it.
+
+KaTeX is vendored rather than reached for at runtime: Zotero ships the same
+version (0.16.22), but sealed inside the note editor's webpack bundle with no
+export to reach. That costs about 350KB in the `.xpi`, nearly all of it the
+maths fonts, and buys correct rendering of essentially everything: across a
+2,800-item library it typeset 11,750 formulas and flagged four, each of them
+genuinely malformed at the source. What it cannot parse it marks in place, and
+the card shows the LaTeX rather than swallowing the sentence. A run too long to
+be a formula is a mis-detected delimiter that has swallowed prose, and is set as
+text instead.
+
+## Install
+
+Download `feed-riffle.xpi` from
+[Releases](https://github.com/ievlevpn/zotero-feed-riffle/releases) → Zotero →
+Tools → Plugins → ⚙ → Install Plugin From File…
+
+## Third-party
+
+Formulas are rendered by [KaTeX](https://katex.org) 0.16.22 (MIT), vendored in
+`katex.min.js`, `katex.min.css` and `fonts/`. Its licence is in `LICENSE-KaTeX`.
+
+## Develop
+
+Plain bootstrapped plugin, no build step. `node test.js` checks the pure helpers
+— fuzzy ranking, the LaTeX parser and its MathML output, delimiter splitting,
+the importer-damage inverse, tag splitting and typography. `./release.sh` cuts a
+release after you bump `version` in `manifest.json`.

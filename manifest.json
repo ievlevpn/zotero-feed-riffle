@@ -1,0 +1,19 @@
+{
+	"manifest_version": 2,
+	"name": "Feed Riffle",
+	"version": "0.1.0",
+	"description": "Deals unread RSS feed items out one card at a time: left arrow discards, right arrow files into a fuzzy-searched collection, with optional tags and a note. For clearing a feed backlog at speed.",
+	"author": "Pavel Ievlev",
+	"icons": {
+		"48": "icon.svg",
+		"96": "icon.svg"
+	},
+	"applications": {
+		"zotero": {
+			"id": "feed-riffle@local",
+			"update_url": "https://raw.githubusercontent.com/ievlevpn/zotero-feed-riffle/master/update.json",
+			"strict_min_version": "6.999",
+			"strict_max_version": "10.*"
+		}
+	}
+}
