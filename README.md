@@ -79,10 +79,12 @@ LaTeX can hold. All four delimiter styles are understood — `$…$`, `$$…$$`,
 `\(…\)` and `\[…\]` — in titles as well as descriptions. KaTeX loads on first
 use rather than at startup, so a plugin you never open costs nothing.
 
-`\color` is read the way MathJax reads it — `\color{red}{x}` tints only `x` —
-because that is what feed math is written for. KaTeX defaults to LaTeX's
-reading, where `\color` is a switch that tints the rest of the group, and one
-coloured word bleeds into the whole line.
+`\color` means two different things and feeds contain both. MathJax reads
+`\color{red}{x}` as two arguments and tints only `x`; LaTeX reads `\color{red}`
+as a switch that tints the rest of the group. They are told apart by what
+follows the colour — a brace is the argument form — so that one is rewritten to
+`\textcolor`, which is unambiguous, and the switch form is left for KaTeX to
+handle as LaTeX specifies. Both work.
 
 A `$` only opens math when what follows reads like math. Outside academic feeds
 a dollar sign is usually money, and "raised $5 million and $10 million" must not

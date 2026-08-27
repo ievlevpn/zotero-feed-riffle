@@ -254,20 +254,30 @@ function katexFragment(doc, html) {
 	}, null);
 }
 
+// "\\color" means two different things and feeds contain both. MathJax reads
+// "\\color{red}{x}" as two arguments and tints only x; LaTeX reads "\\color{red}"
+// as a switch tinting the rest of the group. They are told apart by what follows
+// the colour — a brace is the argument form — so rewrite that one to
+// "\\textcolor", which is unambiguous, and leave the switch form for KaTeX to
+// handle as LaTeX specifies. Supporting both beats choosing.
+//
+// ponytail: syntactic, so "{\\color{red} {x} y}" — a switch whose next token is
+// a group — is read as the argument form and tints only x. Nothing in the
+// delimiters can distinguish that case; TeX itself needs the macro definition.
+function normalizeColor(tex) {
+	return tex.replace(/\\color(?![a-zA-Z])(\s*\{[^{}]*\})\s*\{/g, "\\textcolor$1{");
+}
+
 // One formula, typeset into `parent`.
 function mathInto(doc, parent, tex, display) {
 	if (katexLib) {
 		// throwOnError keeps one bad formula from taking out the card: KaTeX
 		// renders what it can and marks the rest. trust:false refuses \href and
 		// friends — this is a feed, and it does not get to inject links.
-		const html = safe(() => katexLib.renderToString(tex, {
+		// KaTeX's own \color stays a switch, as LaTeX specifies; normalizeColor
+		// has already turned the argument form into \textcolor above.
+		const html = safe(() => katexLib.renderToString(normalizeColor(tex), {
 			displayMode: !!display, throwOnError: false, strict: false, trust: false,
-			// Feed maths is written for MathJax, which reads "\color{red}{x}" as
-			// two arguments and tints only x. KaTeX defaults to LaTeX's reading,
-			// where \color is a switch that tints the rest of the group — so one
-			// coloured word bled into the whole line. 18 of the 20 \color uses in
-			// a 2,800-item library are the two-argument form.
-			colorIsTextColor: true,
 		}), null);
 		const frag = html && katexFragment(doc, html);
 		if (frag) { parent.append(frag); return; }
@@ -1511,5 +1521,5 @@ function uninstall() {}
 if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
-		looksLikeMath };
+		looksLikeMath, normalizeColor };
 }

@@ -156,4 +156,24 @@ assert.strictEqual(un([El("x", { "$m": "2$" }, [])]), "<x $m=2$>", "valued attri
 assert.strictEqual(un([El("x", { xmlns: "http://www.w3.org/1999/xhtml" }, [])]), "<x>",
 	"the serialiser's xmlns is not part of the text");
 
+
+
+// --- \color, which means two different things ------------------------------
+const { normalizeColor } = require("./bootstrap.js");
+const C = normalizeColor;
+// MathJax's argument form: a brace follows the colour, so it becomes \textcolor
+// and tints only its argument.
+assert.strictEqual(C("\\color{red}{x} y"), "\\textcolor{red}{x} y");
+assert.strictEqual(C("\\color {green}{g}"), "\\textcolor {green}{g}", "space before the colour");
+assert.strictEqual(C("\\color{#ff0000}{x}"), "\\textcolor{#ff0000}{x}", "hex colours too");
+// LaTeX's switch form: nothing braced follows, so it is left for KaTeX to
+// switch on and tints to the end of the group.
+assert.strictEqual(C("\\color{red} \\begin{bmatrix} a \\end{bmatrix}"),
+	"\\color{red} \\begin{bmatrix} a \\end{bmatrix}", "switch form untouched");
+assert.strictEqual(C("{\\color{red} text}"), "{\\color{red} text}", "switch form untouched");
+// Neighbours that merely start with the same letters must not be rewritten.
+assert.strictEqual(C("\\colorbox{red}{x}"), "\\colorbox{red}{x}", "\\colorbox is a different command");
+assert.strictEqual(C("\\textcolor{red}{x}"), "\\textcolor{red}{x}", "already unambiguous");
+assert.strictEqual(C("no colour here"), "no colour here");
+
 console.log("ok");
