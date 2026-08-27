@@ -176,4 +176,22 @@ assert.strictEqual(C("\\colorbox{red}{x}"), "\\colorbox{red}{x}", "\\colorbox is
 assert.strictEqual(C("\\textcolor{red}{x}"), "\\textcolor{red}{x}", "already unambiguous");
 assert.strictEqual(C("no colour here"), "no colour here");
 
+
+
+// --- recognising the same work across a feed and the library ---------------
+const { refKeys } = require("./bootstrap.js");
+const K = (d, u) => refKeys(d, u);
+// The version suffix must not be part of the key: the feed announces v2 of the
+// v1 already sitting in the library.
+assert.deepStrictEqual(K(null, "https://arxiv.org/abs/2604.04661"), ["arxiv:2604.04661", "url:arxiv.org/abs/2604.04661"]);
+assert.ok(K(null, "https://arxiv.org/abs/2604.04661v2").includes("arxiv:2604.04661"), "version ignored");
+assert.ok(K(null, "https://arxiv.org/pdf/2604.04661").includes("arxiv:2604.04661"), "pdf url too");
+assert.ok(K("10.1007/s00440-024-01234-5", null).includes("doi:10.1007/s00440-024-01234-5"), "doi");
+assert.ok(K("https://doi.org/10.1007/S00440-X", null).includes("doi:10.1007/s00440-x"), "doi inside a url, lowercased");
+assert.ok(K(null, "https://www.example.org/a/").includes("url:example.org/a"), "www and trailing slash dropped");
+assert.deepStrictEqual(K(null, null), []);
+assert.deepStrictEqual(K("", "   "), []);
+// A bare non-arXiv number must not be mistaken for an id.
+assert.deepStrictEqual(K(null, "some title 1234"), []);
+
 console.log("ok");

@@ -16,6 +16,8 @@
 const LAST_PREF = "feedRiffle.lastCollection"; // collection id Enter defaults to
 const STATE_PREF = "feedRiffle.state";         // window geometry
 const SIZE_PREF = "feedRiffle.fontScale";      // your own +/- adjustment
+const RECENT_PREF = "feedRiffle.recentCollections"; // most recently filed into
+const RECENT_MAX = 9; // as many as there are number keys
 const BASE_PX = 15;   // reading size at scale 1, before Zotero's own setting
 // The text column, and the card's side padding, in rem. The stylesheet and the
 // window sizer both read these: a window wider than the column it holds is
@@ -49,6 +51,7 @@ let colls = [];        // [{ id, path }] every collection you can file into
 let allTags = [];      // every tag name in the library, for the tag picker
 let undoStack = [];    // {feedItem, itemID} — itemID null for a plain discard
 let scopeLib = null;   // feed libraryID to riffle, or null for every feed
+let libKeys = new Set(); // DOI/arXiv keys already in the library, for the badge
 const RIFFLE_ATTR = "data-feed-riffle"; // marks our window, across installs
 let fontScale = 1;     // multiplier on top of Zotero's font size, persisted
 
@@ -180,6 +183,28 @@ function deLatex(s) {
 		.replace(/\\\\/g, " ")           // a row break, in text, is just a space
 		.replace(/\\[a-zA-Z]+\s?/g, "") // any leftover command, before the
 		.replace(/[{}]/g, "");             // braces that keep it from over-eating
+}
+
+// Keys that identify the same work across a feed and the library. A DOI is
+// definitive; an arXiv id is next best and survives the version suffix, so v1 in
+// the library matches the v2 the feed is announcing; the bare URL is the
+// fallback. Exported for test.js.
+function refKeys(doi, url) {
+	const out = [];
+	for (const raw of [doi, url]) {
+		const v = String(raw || "").trim().toLowerCase();
+		if (!v) continue;
+		// 2604.04661 — the version suffix is deliberately not part of the key.
+		const ax = v.match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})/)
+			|| v.match(/\barxiv:(\d{4}\.\d{4,5})/) || v.match(/^(\d{4}\.\d{4,5})$/);
+		if (ax) out.push("arxiv:" + ax[1]);
+		const d = v.match(/10\.\d{4,9}\/[^\s"<>]+/);
+		if (d) out.push("doi:" + d[0].replace(/[.,;]+$/, ""));
+		if (/^https?:\/\//.test(v)) {
+			out.push("url:" + v.replace(/\/+$/, "").replace(/^https?:\/\/(www\.)?/, ""));
+		}
+	}
+	return out;
 }
 
 // arXiv puts a routing header on every abstract:
@@ -582,6 +607,35 @@ function flatCollections() {
 	return out;
 }
 
+// Every DOI and URL already in the library, as keys. A few thousand rows, so it
+// is read once and matched in memory rather than queried per card.
+async function loadLibraryKeys() {
+	const sql = "SELECT v.value FROM itemData d "
+		+ "JOIN itemDataValues v ON v.valueID = d.valueID "
+		+ "JOIN items i ON i.itemID = d.itemID "
+		+ "WHERE d.fieldID IN (SELECT fieldID FROM fields WHERE fieldName IN ('DOI','url')) "
+		+ "AND i.libraryID NOT IN (SELECT libraryID FROM feeds) "
+		+ "AND i.itemID NOT IN (SELECT itemID FROM deletedItems)";
+	const rows = (await Zotero.DB.columnQueryAsync(sql)) || [];
+	const set = new Set();
+	for (const v of rows) for (const k of refKeys(null, v)) set.add(k);
+	return set;
+}
+
+// Collections you have filed into lately, most recent first — the ones the
+// number keys reach.
+function recentIDs() {
+	const saved = safe(() => JSON.parse(Zotero.Prefs.get(RECENT_PREF) || "[]"), []);
+	return (Array.isArray(saved) ? saved : []).filter((id) => Number.isInteger(id))
+		.filter((id) => safe(() => !!Zotero.Collections.get(id), false))
+		.slice(0, RECENT_MAX);
+}
+
+function pushRecent(id) {
+	const next = [id].concat(recentIDs().filter((x) => x !== id)).slice(0, RECENT_MAX);
+	safe(() => Zotero.Prefs.set(RECENT_PREF, JSON.stringify(next)));
+}
+
 async function loadTags() {
 	const sql = "SELECT DISTINCT name FROM tags WHERE tagID IN ("
 		+ "SELECT tagID FROM itemTags JOIN items USING (itemID) "
@@ -630,6 +684,7 @@ async function keep(feedItem, collectionID, tags, note) {
 
 	await feedItem.toggleRead(true);
 	Zotero.Prefs.set(LAST_PREF, String(collectionID));
+	pushRecent(collectionID);
 	undoStack.push({ id: feedItem.id, itemID: item.id });
 }
 
@@ -637,7 +692,7 @@ async function keep(feedItem, collectionID, tags, note) {
 // riffling speed a mis-hit is a matter of when, not if.
 async function undo() {
 	const last = undoStack.pop();
-	if (!last) return false;
+	if (!last) return null;
 	if (last.itemID) {
 		const saved = await Zotero.Items.getAsync(last.itemID);
 		if (saved) await saved.eraseTx();
@@ -650,7 +705,7 @@ async function undo() {
 		await Zotero.Items.loadDataTypes([feedItem], ["itemData", "creators", "tags"]);
 		cache.set(feedItem.id, feedItem);
 	}
-	return true;
+	return last;
 }
 
 // --- window ----------------------------------------------------------------
@@ -702,12 +757,12 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
  * drops downward rather than up like the filing panel's. */
 .feedpick .drop { position:static; margin-top:.35rem; max-height:42vh;
 	border:none; box-shadow:none; border-radius:4px; }
-.feedpick .drop div { display:flex; align-items:baseline; gap:.6rem; }
-.feedpick .drop div span { flex:1; min-width:0; overflow:hidden;
-	text-overflow:ellipsis; }
-.feedpick .drop b { font-weight:400; font-size:.78em; color:GrayText;
+/* Rows carrying a trailing figure — an unread count, or a number-key hint. */
+.drop div { display:flex; align-items:baseline; gap:.6rem; }
+.drop div span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.drop b { font-weight:400; font-size:.78em; color:GrayText;
 	font-variant-numeric:tabular-nums; }
-.feedpick .drop div.on b { color:HighlightText; }
+.drop div.on b { color:HighlightText; }
 .head .count { margin-left:auto; font-size:.74rem; color:GrayText;
 	white-space:nowrap; font-variant-numeric:tabular-nums; }
 
@@ -734,6 +789,9 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	border:1px solid color-mix(in srgb, GrayText 45%, Canvas); }
 .badge.replace { border-color:color-mix(in srgb, Highlight 55%, Canvas);
 	color:color-mix(in srgb, Highlight 75%, CanvasText); }
+.badge.have { border-color:color-mix(in srgb, Highlight 60%, Canvas);
+	background:color-mix(in srgb, Highlight 16%, Canvas);
+	color:color-mix(in srgb, Highlight 80%, CanvasText); }
 
 /* Whatever tags the feed itself supplied. */
 .tags { display:flex; flex-wrap:wrap; gap:.3rem; margin:-.9rem auto 1.45rem; }
@@ -801,13 +859,29 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .url:hover { color:color-mix(in srgb, Highlight 72%, CanvasText);
 	text-decoration:underline; text-underline-offset:.16em; }
 
-/* The card is replaced wholesale on every advance, so a keyframe on the new
- * node is all the motion this needs — no transition bookkeeping. */
-@keyframes inL { from { opacity:0; transform:translateX(26px); } }
-@keyframes inR { from { opacity:0; transform:translateX(-26px); } }
-.card.from-left  { animation:inL .13s ease-out; }
-.card.from-right { animation:inR .13s ease-out; }
-@media (prefers-reduced-motion:reduce) { .card { animation:none !important; } }
+/* Entry: the new card arrives from the side you are travelling towards —
+ * forward from the right, undo from the left. (These names used to be the wrong
+ * way round: "from-left" ran the keyframe that enters from the right.) */
+@keyframes inFromRight { from { opacity:0; transform:translateX(26px); } }
+@keyframes inFromLeft  { from { opacity:0; transform:translateX(-26px); } }
+.card.from-right { animation:inFromRight .13s ease-out; }
+.card.from-left  { animation:inFromLeft .13s ease-out; }
+
+/* Exit: the card you acted on leaves the way you sent it. A clone, so render()
+ * goes on replacing the live card wholesale with no transition bookkeeping. */
+.ghost { position:fixed; z-index:5; pointer-events:none; overflow:hidden; }
+@keyframes outLeft  { to { opacity:0; transform:translateX(-46px); } }
+@keyframes outRight { to { opacity:0; transform:translateX(46px); } }
+.ghost.out-left  { animation:outLeft .17s ease-in forwards; }
+.ghost.out-right { animation:outRight .17s ease-in forwards; }
+
+/* 3. A long description that continues past the fold says so, instead of
+ * looking exactly like one that has ended. */
+.card.more { mask-image:linear-gradient(to bottom, #000 calc(100% - 2.6rem), transparent); }
+@media (prefers-reduced-motion:reduce) {
+	.card, .ghost { animation:none !important; }
+	.ghost { display:none; }
+}
 
 .done { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
 	gap:8px; color:GrayText; }
@@ -1095,6 +1169,7 @@ async function reload() {
 		undoStack = [];
 		colls = flatCollections();
 		allTags = await loadTags();
+		libKeys = await loadLibraryKeys();
 		await hydrate(0);
 	}
 	catch (e) {
@@ -1214,10 +1289,39 @@ function build(w) {
 
 	let panel = null;      // the filing panel, or null when just riffling
 	let dir = "from-right"; // which way the last card came in
+	let ghost = null;       // the outgoing card, mid-flight
+
+	// The card you just acted on flies off the way you sent it: left for
+	// discard, right for keep. Cloned and thrown away rather than retained, and
+	// never more than one in the air however fast you riffle.
+	const flick = (way) => {
+		const reduce = safe(() => w.matchMedia("(prefers-reduced-motion: reduce)").matches, false);
+		if (reduce) return;
+		const drop = () => { if (ghost) { ghost.remove(); ghost = null; } };
+		drop();
+		const r = cardBox.getBoundingClientRect();
+		if (!r.height) return;
+		ghost = cardBox.cloneNode(true);
+		ghost.className = "card ghost out-" + way; // keeps the card's own styling
+		ghost.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;`
+			+ `width:${r.width}px;height:${r.height}px;`;
+		doc.body.append(ghost);
+		ghost.scrollTop = cardBox.scrollTop; // leave from where you were reading
+		ghost.addEventListener("animationend", drop, { once: true });
+		w.setTimeout(drop, 500); // in case the event never lands
+	};
+
+	// Fade the bottom edge while there is more description below.
+	const paintFade = () => {
+		const more = cardBox.scrollTop + cardBox.clientHeight < cardBox.scrollHeight - 4;
+		cardBox.classList.toggle("more", more);
+	};
+	cardBox.addEventListener("scroll", paintFade);
 	// Held-down arrow keys repeat far faster than a saveTx round-trip. Without
 	// this, two presses read the same card, marked it read once, and advanced
 	// the cursor twice — the item in between was never shown.
 	let busy = false;
+	let skipped = 0; // this session, for the count on the done screen
 	const guard = (p) => {
 		busy = true;
 		return p.finally(() => { busy = false; });
@@ -1245,8 +1349,9 @@ function build(w) {
 	};
 
 	const cardHints = () => hint([
-		["←", "discard"], ["→", "keep"], ["u", "undo"], ["f", "feed"],
-		["o", "open"], ["↑↓", "scroll"], ["+/−", "size"], ["Esc", "close"],
+		["←", "discard"], ["→", "keep"], ["s", "skip"], ["u", "undo"],
+		["1–9", "recent"], ["f", "feed"], ["o", "open"], ["+/−", "size"],
+		["Esc", "close"],
 	]);
 
 	// --- the card ---------------------------------------------------------
@@ -1273,7 +1378,10 @@ function build(w) {
 			const done = el(doc, "div", "done");
 			done.append(
 				el(doc, "div", "big", total ? "✓" : "—"),
-				el(doc, "div", null, total ? `${total} item${total === 1 ? "" : "s"} cleared.` : "Nothing unread."),
+				el(doc, "div", null, total
+					? `${total - skipped} of ${total} cleared`
+						+ (skipped ? `, ${skipped} skipped for later.` : ".")
+					: "Nothing unread."),
 			);
 			cardBox.append(done);
 			hint([["u", "undo"], ["r", "reload"], ["Esc", "close"]]);
@@ -1319,6 +1427,13 @@ function build(w) {
 		const when = shortDate(item.getField("date"));
 		if (when) meta.append(el(doc, "span", "when", when));
 		if (kind) meta.append(el(doc, "span", "badge " + kind, kind));
+		// Matched on DOI or arXiv id, so a v2 announcement finds the v1 you
+		// already saved. Worth knowing before you file a second copy.
+		if (refKeys(item.getField("DOI"), item.getField("url")).some((k) => libKeys.has(k))) {
+			const have = el(doc, "span", "badge have", "in library");
+			have.title = "A copy of this is already in your library";
+			meta.append(have);
+		}
 		if (meta.childNodes.length) cardBox.append(meta);
 
 		// Only what the feed itself put on the item — nothing inferred from the
@@ -1347,6 +1462,7 @@ function build(w) {
 		}
 
 		cardHints();
+		paintFade();
 		hydrate(cursor).catch(oops);
 	}
 
@@ -1357,13 +1473,42 @@ function build(w) {
 	const doDiscard = () => {
 		const item = current();
 		if (!item || busy) return;
+		flick("left");
 		guard(discard(item).then(advance)).catch(oops);
+	};
+
+	// Most items go to a handful of places, so the handful get a number each.
+	// The panel is still there for everything else.
+	const fileRecent = (n) => {
+		const item = current();
+		if (!item || busy) return;
+		const id = recentIDs()[n - 1];
+		if (!id) return flash("No recent collection " + n);
+		const path = (colls.find((c) => c.id === id) || {}).path;
+		if (!path) return flash("That collection is gone");
+		flick("right");
+		guard(keep(item, id, [], "").then(() => { flash("→ " + path); advance(); }))
+			.catch((e) => { oops(e); flash("Save failed — see the error console"); });
+	};
+
+	// The third outcome. Deciding on every single card is what turns a backlog
+	// into a wall; this leaves the item unread so it comes back another day.
+	const doSkip = () => {
+		const item = current();
+		if (!item || busy) return;
+		// Nothing to undo about a skip, but it still takes a place on the stack:
+		// without one, u would un-read an older item while stepping back to this
+		// card. toggleRead(false) on an item that was never read is a no-op.
+		undoStack.push({ id: item.id, itemID: null, skip: true });
+		skipped++;
+		advance();
 	};
 
 	const doUndo = () => {
 		if (busy) return;
-		guard(undo().then((ok) => {
-			if (!ok) return flash("Nothing to undo");
+		guard(undo().then((was) => {
+			if (!was) return flash("Nothing to undo");
+			if (was.skip) skipped = Math.max(0, skipped - 1);
 			dir = "from-left";
 			// The undone item is the one before the cursor, unless we already
 			// ran off the end — then it is the last card.
@@ -1405,9 +1550,14 @@ function build(w) {
 		doc.body.insertBefore(panel, bar);
 
 		// Last collection first, so Enter alone repeats the previous filing.
-		const lastID = lastCollectionID();
-		const ordered = colls.slice().sort((a, b) =>
-			(b.id === lastID) - (a.id === lastID));
+		// Recents first, most recent first — so Enter still repeats the last
+		// filing, and the rows the number keys reach are the rows on top.
+		const recent = recentIDs();
+		const place = (c) => {
+			const i = recent.indexOf(c.id);
+			return i < 0 ? recent.length : i;
+		};
+		const ordered = colls.slice().sort((a, b) => place(a) - place(b));
 
 		const tags = [];
 		let stage = 0; // 0 collection, 1 + tags, 2 + note
@@ -1431,8 +1581,12 @@ function build(w) {
 				cDrop.append(el(doc, "div", "none", "No matching collection"));
 				return;
 			}
+			const numbered = !cIn.value.trim();
 			shown.forEach((c, i) => {
-				const row = el(doc, "div", i === sel ? "on" : null, c.path);
+				const row = el(doc, "div", i === sel ? "on" : null);
+				row.append(el(doc, "span", null, c.path));
+				// Only while unfiltered, when row order and key order agree.
+				if (numbered && i < recent.length) row.append(el(doc, "b", null, String(i + 1)));
 				row.addEventListener("mousedown", (e) => {
 					e.preventDefault();
 					sel = i;
@@ -1562,6 +1716,7 @@ function build(w) {
 				.filter((t, i, a) => t && a.indexOf(t) === i);
 			const feedItem = item;
 			closePanel();
+			flick("right");
 			guard(keep(feedItem, c.id, finalTags, nIn.value.trim())
 				.then(() => { flash("→ " + c.path); advance(); }))
 				.catch((e) => { oops(e); flash("Save failed — see the error console"); });
@@ -1635,6 +1790,7 @@ function build(w) {
 		switch (e.key) {
 			case "ArrowLeft": e.preventDefault(); doDiscard(); break;
 			case "ArrowRight": e.preventDefault(); openPanel(); break;
+			case "s": e.preventDefault(); doSkip(); break;
 			case "u": e.preventDefault(); doUndo(); break;
 			case "+": case "=": e.preventDefault(); setScale(fontScale + SIZE_STEP); break;
 			case "-": case "_": e.preventDefault(); setScale(fontScale - SIZE_STEP); break;
@@ -1649,7 +1805,12 @@ function build(w) {
 				e.preventDefault();
 				cardBox.scrollBy({ top: cardBox.clientHeight * (e.shiftKey ? -0.85 : 0.85) });
 				break;
-			default: break;
+			default:
+				if (e.key >= "1" && e.key <= "9") {
+					e.preventDefault();
+					fileRecent(Number(e.key));
+				}
+				break;
 		}
 	};
 	w._riffleKey = keyHandler;
@@ -1715,5 +1876,5 @@ function uninstall() {}
 if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
-		looksLikeMath, normalizeColor };
+		looksLikeMath, normalizeColor, refKeys };
 }

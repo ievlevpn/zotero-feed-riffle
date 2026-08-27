@@ -28,12 +28,28 @@ Each card shows the title, authors, date and abstract.
 |---|---|
 | <kbd>←</kbd> | discard — marks it read and moves on |
 | <kbd>→</kbd> | keep — opens the filing panel |
-| <kbd>u</kbd> / <kbd>Ctrl</kbd>+<kbd>Z</kbd> | undo the last discard or save |
+| <kbd>s</kbd> | skip — leave it unread for another day |
+| <kbd>1</kbd>–<kbd>9</kbd> | file straight into a recently used collection |
+| <kbd>u</kbd> / <kbd>Ctrl</kbd>+<kbd>Z</kbd> | undo the last discard, save or skip |
 | <kbd>f</kbd> | switch feed (or click the feed name) |
 | <kbd>o</kbd> | open the paper in your browser |
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
 | <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> | text bigger, smaller, reset (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> too) |
 | <kbd>Esc</kbd> | close |
+
+Three outcomes, not two. <kbd>←</kbd> discards, <kbd>→</kbd> files, and
+<kbd>s</kbd> skips — leaving the item unread so it comes back another day.
+Having to reach a verdict on every single card is what turns a backlog into a
+wall.
+
+Most items go to a handful of collections, so the handful get a number each:
+<kbd>1</kbd>–<kbd>9</kbd> files straight from the card without opening the
+panel. The numbers are the rows at the top of the collection picker, so you can
+see which is which.
+
+A card whose DOI or arXiv id is already in your library is marked **in library**.
+The version suffix is ignored, so a `replace` announcement finds the copy you
+saved months ago instead of quietly making a second one.
 
 ### Switching feeds
 
