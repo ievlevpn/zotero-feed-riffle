@@ -203,4 +203,23 @@ assert.deepStrictEqual(K("", "   "), []);
 // A bare non-arXiv number must not be mistaken for an id.
 assert.deepStrictEqual(K(null, "some title 1234"), []);
 
+
+
+// --- feeds that mark maths with a class instead of delimiters --------------
+const { markClassMath } = require("./bootstrap.js");
+const span = (t) => ({ textContent: t, getAttribute: () => "math-container" });
+const rootOf = (els) => ({ querySelectorAll: () => els });
+const mark = (t) => { const e = span(t); markClassMath(rootOf([e])); return e.textContent; };
+
+assert.strictEqual(mark("x + y"), "$x + y$", "plain content becomes inline maths");
+// KaTeX refuses an environment inline — "{equation} can be used only in display
+// mode" — so the delimiters we invent have to say which kind it is.
+assert.strictEqual(mark("\\begin{equation}a\\end{equation}"),
+	"$$\\begin{equation}a\\end{equation}$$", "an environment is display maths");
+assert.strictEqual(mark("\\begin {align}a\\end{align}"),
+	"$$\\begin {align}a\\end{align}$$", "even with a space after \\begin");
+assert.strictEqual(mark("\\tag{1}x"), "$$\\tag{1}x$$", "\\tag is display-only too");
+assert.strictEqual(mark("$x$"), "$x$", "content that already has delimiters is left alone");
+assert.strictEqual(mark("   "), "   ", "blank content is left alone");
+
 console.log("ok");

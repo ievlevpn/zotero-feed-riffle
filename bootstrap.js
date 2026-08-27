@@ -1085,7 +1085,13 @@ function typesetInto(doc, root) {
 function markClassMath(root) {
 	for (const el of root.querySelectorAll('[class*="math"]')) {
 		const body = el.textContent || "";
-		if (body.trim() && !body.includes("$")) el.textContent = "$" + body + "$";
+		if (!body.trim() || body.includes("$")) continue;
+		// An environment or a \tag is display maths and KaTeX refuses it inline —
+		// "{equation} can be used only in display mode" — so the delimiters we
+		// invent have to say which kind it is.
+		const display = /\\begin\s*\{|\\tag\b/.test(body);
+		const d = display ? "$$" : "$";
+		el.textContent = d + body + d;
 	}
 }
 
@@ -1966,5 +1972,5 @@ function uninstall() {}
 if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
-		looksLikeMath, normalizeColor, refKeys };
+		looksLikeMath, normalizeColor, refKeys, markClassMath };
 }
