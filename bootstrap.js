@@ -111,13 +111,39 @@ function wordScore(w, name) {
 		: sub;
 }
 
+// One word of the query, which may be two words run together: "roughstoch" for
+// "Stochastic analysis / Rough paths". A plain scan only ever reads left to
+// right, so that one fails where "stochrough" succeeds — the word order is the
+// only difference. When it fails, try every place the word could have been
+// split and score the halves independently, which is order-blind. Only one
+// split: two is a spelling of its own, and the halves stay long enough to mean
+// something. Charged a point, so a match that needed no splitting stays ahead.
+function splitScore(w, name) {
+	const whole = wordScore(w, name);
+	if (whole !== null) return whole;
+	let best = null;
+	// Both halves have to land at the start of a word and run without a gap —
+	// what two run-together words look like. Anything looser turns every query
+	// into a haystack: "paths" alone matched four times as many collections.
+	const clean = 1 + name.length / 100;
+	for (let i = 3; i <= w.length - 3; i++) {
+		const a = wordScore(w.slice(0, i), name);
+		if (a === null || a >= clean) continue;
+		const b = wordScore(w.slice(i), name);
+		if (b === null || b >= clean) continue;
+		const sum = a + b + 1;
+		if (best === null || sum < best) best = sum;
+	}
+	return best;
+}
+
 // Every word of the query has to match, but in any order, so "paths rough"
 // finds "Rough Paths". Costs add, so the tightest overall match wins.
 function score(q, name) {
 	let sum = 0;
 	for (const w of q.split(/\s+/)) {
 		if (!w) continue;
-		const s = wordScore(w, name);
+		const s = splitScore(w, name);
 		if (s === null) return null;
 		sum += s;
 	}
@@ -437,6 +463,70 @@ function unparse(node, out) {
 		unparse(c, out);
 	}
 	return out;
+}
+
+// unparse() puts back most of what the importer's parser mangled, but not all:
+// the words after a misread "<" were taken for attributes, and a sanitiser that
+// drops attributes drops them with it — leaving the abstract stopped
+// mid-sentence with no sign that anything is missing. Two marks together say so:
+// a tag whose name is really a piece of the prose, and no closing punctuation.
+// Across a 4,100-abstract library that is four items, every one of them
+// genuinely mutilated; the fifteen misread tags whose sentences still finish are
+// left alone. Exported for test.js.
+function importerCut(raw) {
+	const s = String(raw || "").trim();
+	if (!s) return false;
+	const tags = /<\/?([a-zA-Z][^\s>\/]*)/g;
+	let bogus = false;
+	for (let m; (m = tags.exec(s));) {
+		if (!/^[a-z][a-z0-9-]*$/i.test(m[1])) { bogus = true; break; }
+	}
+	// A tag at the very end is the serialiser's, not the author's last word.
+	return bogus && !/[.!?)\]}$"”]$/.test(s.replace(/<[^>]*>$/, "").trim());
+}
+
+// A feed cannot run MathJax, so a site that typesets on the page ships its
+// formulas to the feed as pictures instead — with the LaTeX itself in the URL.
+// Two conventions cover essentially all of them: CodeCogs puts the source
+// straight in the query, WordPress and friends put it in a "latex" parameter.
+// The sizing and colour macros are about the picture, not the maths.
+// Exported for test.js.
+function imgMath(src) {
+	const u = String(src || "");
+	const named = u.match(/[?&](?:latex|chl|math)=([^&]*)/i);
+	const codecogs = u.match(/latex\.codecogs\.com\/[a-z]+\.[a-z]+\?(.*)$/i);
+	const q = named ? named[1] : codecogs && codecogs[1];
+	if (!q) return null;
+	const tex = safe(() => decodeURIComponent(q.replace(/\+/g, " ")), null);
+	if (!tex) return null;
+	return tex.replace(/\\(?:dpi|bg|fg)\s*\{[^}]*\}/g, "")
+		.replace(/\\(?:bg|fg)_[a-z]+/gi, "")
+		.replace(/\\(?:inline|tiny|small|large|huge|LARGE|Huge)\b/g, "")
+		.trim() || null;
+}
+
+// Those pictures, turned back into formulas before the sanitizer drops every
+// <img> along with the tracking pixels. Nothing is fetched: the source was in
+// the address all along, and it gets typeset like any other formula. An image
+// standing alone in its paragraph was display maths on the page, and says so.
+function inlineImgMath(doc, raw) {
+	const s = String(raw || "");
+	if (!/<img/i.test(s)) return s;
+	return safe(() => {
+		const parsed = parseHTML(doc, s);
+		if (!parsed) return s;
+		let hit = false;
+		for (const img of parsed.querySelectorAll("img")) {
+			const tex = imgMath(img.getAttribute("src"));
+			if (!tex) continue;
+			hit = true;
+			const alone = !(img.parentNode.textContent || "").trim()
+				&& img.parentNode.querySelectorAll("img").length === 1;
+			const d = alone ? "$$" : "$";
+			img.replaceWith(parsed.createTextNode(d + tex + d));
+		}
+		return hit ? parsed.body.innerHTML : s;
+	}, s);
 }
 
 // Plain text, whatever the importer did to it on the way in.
@@ -1274,6 +1364,7 @@ function markClassMath(root) {
 // The whole description, as an element.
 function abstractNode(doc, raw, baseURL) {
 	const box = el(doc, "div", "abs");
+	raw = inlineImgMath(doc, raw);
 
 	const frag = /[<&]/.test(String(raw || "")) ? sanitizedFragment(doc, raw, baseURL) : null;
 	if (frag && frag.querySelector && frag.querySelector(BLOCKS)) {
@@ -1720,6 +1811,15 @@ function build(w) {
 		cardBox.append(body
 			? abstractNode(doc, body, item.getField("url"))
 			: el(doc, "div", "abs empty", "No abstract."));
+
+		// Said plainly, because nothing else on the card would give it away: the
+		// text simply stops, reading like a short abstract rather than a lost one.
+		if (importerCut(item.getField("abstractNote"))) {
+			cardBox.append(el(doc, "div", "warn",
+				"Zotero's feed importer read a \u201c<\u201d in this abstract as the start of "
+				+ "an HTML tag and dropped what followed, so it breaks off early. "
+				+ "The whole thing is at the link below \u2014 o opens it."));
+		}
 
 		if (katexError) {
 			cardBox.append(el(doc, "div", "warn",
@@ -2367,5 +2467,5 @@ if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
-		heldPhrase };
+		heldPhrase, importerCut, imgMath };
 }

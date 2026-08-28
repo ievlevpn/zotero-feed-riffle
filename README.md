@@ -140,6 +140,16 @@ follows the colour — a brace is the argument form — so that one is rewritten
 `\textcolor`, which is unambiguous, and the switch form is left for KaTeX to
 handle as LaTeX specifies. Both work.
 
+Some feeds send their formulas as **pictures**: a site that typesets with
+MathJax in the browser cannot do that in an RSS item, so it links a rendered
+image instead — and the LaTeX is right there in the URL
+(`latex.codecogs.com/png.latex?%5Clambda`, `s0.wp.com/latex.php?latex=…`).
+Images are dropped from a card, deliberately: a remote `<img>` in a feed is as
+often a tracking pixel as a picture. So the source is taken out of the address
+and typeset like any other formula, before the sanitizer drops the tag. Nothing
+is fetched. Across the feeds in one library that recovers 1,279 formulas of the
+1,492 images there; the remaining 213 are real pictures and stay dropped.
+
 A `$` only opens math when what follows reads like math. Outside academic feeds
 a dollar sign is usually money, and "raised $5 million and $10 million" must not
 become an equation.
@@ -191,6 +201,15 @@ damaged span is gone for good.
 
 This needs a literal `<` in a plain-text feed, so it is rare — but arXiv math
 hits it, and undoing it beats displaying it.
+
+Sometimes it cannot be undone. The words after the misread `<` are stored as
+attributes, and whatever drops attributes drops them too, so the abstract simply
+stops mid-sentence — reading like a short abstract rather than a mutilated one.
+Two marks together say what happened: a tag whose name is really a piece of the
+prose, and no closing punctuation. The card then says so and points at the link,
+rather than letting you read a truncated sentence as the whole story. Across a
+4,100-abstract library that is four items; the fifteen other misread tags there
+come back whole and are left alone.
 
 KaTeX is vendored rather than reached for at runtime: Zotero ships the same
 version (0.16.22), but sealed inside the note editor's webpack bundle with no

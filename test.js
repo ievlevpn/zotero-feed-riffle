@@ -1,7 +1,7 @@
 // Self-check: node test.js  (exits non-zero on failure)
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
-	foldLibraryRows, heldPhrase } = require("./bootstrap.js");
+	foldLibraryRows, heldPhrase, importerCut, imgMath } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -254,3 +254,38 @@ assert.strictEqual(heldPhrase(1, 1), "1 note and 1 annotation", "singulars");
 assert.strictEqual(heldPhrase(0, 3), "3 annotations", "no empty half");
 assert.strictEqual(heldPhrase(0, 0), "nothing of yours",
 	"the case where trashing it is the obvious answer");
+
+// --- one token that runs two words together, either way round -------------
+// "stochrough" always worked: a plain scan reads left to right. "roughstoch"
+// is the same words in the other order, and used to match nothing at all.
+const sc = [{ path: "Stochastic analysis / Rough paths" }, { path: "Stochastic geometry" }];
+assert.strictEqual(rank("roughstoch", sc, (c) => c.path)[0].path,
+	"Stochastic analysis / Rough paths", "matches with the words the other way round");
+assert.ok(score("stochrough", "stochastic analysis / rough paths")
+	< score("roughstoch", "stochastic analysis / rough paths"),
+	"but reading straight through still wins where it can");
+assert.strictEqual(score("hspa", "rough paths"), null,
+	"halves under three letters never split: too little to mean anything");
+assert.strictEqual(score("pathsough", "rough paths"), null,
+	"and a split only counts when both halves start a word");
+
+// --- importerCut: an abstract the importer truncated, and nothing else -----
+assert.ok(importerCut('the domain G(T)=(-T<ti<t,tj xmlns="http://www.w3.org/1999/xhtml">0 if j</ti<t,tj>'),
+	"a tag named out of the prose, and the sentence never finishes");
+assert.ok(!importerCut("sub-diffusive $(0<H<1/2)$ or super-diffusive $(1/2<H<1)$."),
+	"the same misreading, but the text came back whole: not a loss");
+assert.ok(!importerCut("<p>Ordinary feed HTML, ending as it should.</p>"),
+	"real markup is not damage");
+assert.ok(!importerCut("An abstract that just has no full stop"),
+	"and neither is a missing full stop on its own");
+
+// --- imgMath: a feed's formulas arrive as pictures, source and all ---------
+assert.strictEqual(imgMath("https://latex.codecogs.com/png.latex?%5Clambda"), "\\lambda",
+	"CodeCogs keeps the LaTeX in the query itself");
+assert.strictEqual(imgMath("https://s0.wp.com/latex.php?latex=%5Csqrt%7B5%7D&bg=ffffff&s=0"),
+	"\\sqrt{5}", "WordPress puts it in a parameter, among others");
+assert.strictEqual(imgMath("https://latex.codecogs.com/gif.latex?%5Cdpi%7B110%7D%20%5Cbg_white%20x%5E2"),
+	"x^2", "sizing and colour are about the picture, not the maths");
+assert.strictEqual(imgMath("https://i0.wp.com/math.ucr.edu/home/baez/meson_nonet.png"), null,
+	"a real picture stays a picture, and pictures are dropped");
+assert.strictEqual(imgMath(""), null);
