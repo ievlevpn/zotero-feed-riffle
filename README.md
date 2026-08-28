@@ -104,6 +104,26 @@ where <kbd>Enter</kbd> files and
 moves back a row and <kbd>Esc</kbd> steps back one at a time; either way the row
 you return to opens its own fuzzy list again.
 
+## Riffling a collection
+
+Right-click a collection → **Riffle This Collection…** deals its items out the
+same way, but a collection is not a feed: nothing here is being cleared, so the
+arrows only move. <kbd>←</kbd> and <kbd>→</kbd> step through the deck and write
+nothing at all; you can walk a collection end to end and close the window
+without having touched it.
+
+What changes an item says so by name. <kbd>t</kbd> opens the tag box holding the
+tags the item already has — take one off with <kbd>⌫</kbd> or its ×, add
+another, <kbd>Enter</kbd> saves, and the card redraws with what it now carries.
+<kbd>n</kbd> adds a note, <kbd>m</kbd> moves the item to another collection
+(a move, not a copy: it leaves the one you are riffling), and <kbd>x</kbd> puts
+it in Zotero's trash. Each panel shows its own row and nothing else.
+<kbd>u</kbd> undoes any of it — a trashed or moved card comes back to its own
+place in the deck, and a tag edit is restored exactly, automatic tags included.
+
+The finish summary counts in the same terms: *6 of 24 seen, 18 still to look at*
+and *5 changed · 1 trashed · 12 min*.
+
 ## How it stores things
 
 Nothing of its own, beyond remembering the last collection and the window

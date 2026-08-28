@@ -1059,28 +1059,34 @@ async function keep(feedItem, collectionID, tags, note, dropOld) {
 
 // --- managing a collection -------------------------------------------------
 
-// Tags and a note on an item you already own. Undo takes back exactly what was
-// added here and nothing that was there before.
-async function annotate(item, tags, note) {
+// The tags the item should end up with, rather than a list to add: a chip you
+// took off the panel is a tag taken off the item. Undo restores exactly what
+// was there before, types and all — an automatic tag stays automatic.
+async function retag(item, wanted) {
 	await Zotero.Items.loadDataTypes([item], ["tags"]);
-	const added = tags.filter((t) => item.addTag(t));
-	if (added.length) await item.saveTx();
-	let noteItem = null;
-	if (note) {
-		const n = new Zotero.Item("note");
-		n.libraryID = item.libraryID;
-		n.parentItemID = item.id;
-		n.setNote(noteHTML(note));
-		await n.saveTx();
-		noteItem = n;
-	}
+	const before = item.getTags();
+	const now = new Set(wanted);
+	const gone = before.filter((t) => !now.has(t.tag));
+	const fresh = wanted.filter((t) => !before.some((b) => b.tag === t));
+	if (!gone.length && !fresh.length) return null;
+	for (const t of gone) item.removeTag(t.tag);
+	for (const t of fresh) item.addTag(t);
+	await item.saveTx();
 	return async () => {
-		if (noteItem) await safe(() => noteItem.eraseTx(), null);
-		if (!added.length) return;
 		await Zotero.Items.loadDataTypes([item], ["tags"]);
-		for (const t of added) item.removeTag(t);
+		item.setTags(before);
 		await item.saveTx();
 	};
+}
+
+// A note of your own on an item you already own.
+async function addNote(item, note) {
+	const n = new Zotero.Item("note");
+	n.libraryID = item.libraryID;
+	n.parentItemID = item.id;
+	n.setNote(noteHTML(note));
+	await n.saveTx();
+	return async () => { await safe(() => n.eraseTx(), null); };
 }
 
 // Out of the collection you are riffling and into another one. The item itself
@@ -1893,9 +1899,9 @@ function build(w) {
 				() => setScale(fontScale - SIZE_STEP)]],
 			["Esc", "close", stop]]
 		: [["←→", "move through", [prev, next]],
-			["t", "tags", () => openPanel(manageJob(1, false))],
-			["n", "note", () => openPanel(manageJob(2, false))],
-			["m", "move to", () => openPanel(manageJob(0, true))],
+			["t", "tags", () => openPanel(manageJob("tags", current()))],
+			["n", "note", () => openPanel(manageJob("note", current()))],
+			["m", "move to", () => openPanel(manageJob("move", current()))],
 			["x", "trash", doTrash], ["u", "undo", doUndo], ["o", "open", openURL],
 			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
 				() => setScale(fontScale - SIZE_STEP)]],
@@ -2075,8 +2081,8 @@ function build(w) {
 		}
 		if (meta.childNodes.length) cardBox.append(meta);
 
-		// Only what the feed itself put on the item — nothing inferred from the
-		// title, the collection or anything else.
+		// The item's own tags: what the feed put there, or what you just did with
+		// t. Nothing inferred from the title, the collection or anything else.
 		const feedTags = safe(() => item.getTags(), []).map((t) => t.tag).filter(Boolean);
 		if (feedTags.length) {
 			const row = el(doc, "div", "tags");
@@ -2301,27 +2307,39 @@ function build(w) {
 
 	// The same rows over a collection: what is on the card stays where it is
 	// unless you name somewhere else for it to go.
-	const manageJob = (start, pick) => ({
+	// One panel, one purpose: tags, a note, or a move. Each shows its own row
+	// and nothing else — a note box with a tag box sitting on top of it was
+	// only ever the feed's tab-through-everything flow.
+	const manageJob = (kind, item) => ({
 		label: "Move to",
-		pick,
-		start,
-		run: (item, c, tags, note) => {
+		pick: kind === "move",
+		only: true,
+		start: kind === "tags" ? 1 : kind === "note" ? 2 : 0,
+		// The tags it already has, so the panel is what the item looks like
+		// rather than a list of additions.
+		tags: kind === "tags" ? safe(() => item.getTags(), []).map((t) => t.tag) : [],
+		run: (card, c, tags, note) => {
 			const at = cursor;
 			guard((async () => {
 				const undos = [];
-				if (tags.length || note) undos.push(await annotate(item, tags, note));
-				if (c) undos.push(await moveTo(item, scopeColl, c.id));
-				if (!undos.length) return;
+				if (kind === "tags") undos.push(await retag(card, tags));
+				if (note) undos.push(await addNote(card, note));
+				if (c) undos.push(await moveTo(card, scopeColl, c.id));
+				const back = undos.filter(Boolean);
+				if (!back.length) return;
 				stat.kept++;
 				statTick();
 				undoStack.push({
-					id: item.id, keep: true,
-					revert: async () => { for (const back of undos.reverse()) await back(); },
+					id: card.id,
+					at: c ? at : undefined,
+					revert: async () => { for (const undo of back.reverse()) await undo(); },
 				});
-				flash(c ? "→ " + c.path : (note ? "Note added" : "Tagged"));
-				// A moved card is no longer in this collection, so the deck moves
-				// on; anything else leaves you where you were reading.
-				if (c) { ids.splice(at, 1); cache.delete(item.id); render(); }
+				flash(c ? "→ " + c.path : kind === "note" ? "Note added" : "Tags saved");
+				// A moved card has left this collection, so the deck closes over
+				// it; anything else redraws the card you are still on, which is
+				// how a tag you just took off disappears from it.
+				if (c) { ids.splice(at, 1); cache.delete(card.id); }
+				render();
 			})()).catch((e) => { oops(e); flash("Failed — see the error console"); });
 		},
 	});
@@ -2329,7 +2347,7 @@ function build(w) {
 	function openPanel(job) {
 		const item = current();
 		if (!item || panel || busy) return;
-		const work = isFeedMode() ? null : (job || manageJob(0, true));
+		const work = isFeedMode() ? null : (job || manageJob("move", item));
 		// Only a job that files somewhere needs somewhere to file to.
 		if ((!work || work.pick) && !colls.length) {
 			return flash("No collections to file into");
@@ -2436,7 +2454,7 @@ function build(w) {
 		};
 		const ordered = colls.slice().sort((a, b) => place(a) - place(b));
 
-		const tags = [];
+		const tags = (job.tags || []).slice();
 		// Two different things, and conflating them was a trap: reach is how far
 		// the rows have been revealed, stage is which one has the focus. Click
 		// back into the collection box after tabbing on to tags and the stage
@@ -2618,27 +2636,30 @@ function build(w) {
 			sel = (sel + 1) % shown.length;
 			paintDrop();
 		};
+		const done = job.only ? "save" : "file";
 		const panelHints = () => {
 			if (stage === 0) {
-				hint([["⏎", "file here", () => commit()],
-					["⇥", "add tags", () => { takeCollection(); setStage(1); }],
-					["↑↓", "pick", pick], ["Esc", "back", back]]);
+				hint([["⏎", job.only ? "move here" : "file here", () => commit()]]
+					.concat(job.only
+						? [] : [["⇥", "add tags", () => { takeCollection(); setStage(1); }]])
+					.concat([["↑↓", "pick", pick], ["Esc", "back", back]]));
 			} else if (stage === 1) {
 				const typed = !!tIn.value.trim();
-				hint([["⏎", typed ? "add tag" : "file",
+				hint([["⏎", typed ? "add tag" : done,
 					() => (typed ? takeTag() : commit())]]
 					.concat(typed ? [["⇧⏎", "as new tag", () => takeTag(true)]] : [])
 					.concat(!typed && tags.length
 						? [["⌫", armed ? "remove it" : "last tag", rubOut]] : [])
 					// ⇥ finishes the tag just as ⏎ does; it only earns a place in
 					// the bar once the box is empty and it means something else.
-					.concat(typed ? [] : [["⇥", "add note", () => setStage(2)]])
-					.concat([["⇧⇥", "back", () => setStage(0)],
-						["Esc", "cancel", back]]));
+					.concat(typed || job.only ? [] : [["⇥", "add note", () => setStage(2)]])
+					.concat(job.only ? [] : [["⇧⇥", "back", () => setStage(0)]])
+					.concat([["Esc", "cancel", back]]));
 			} else {
 				// Nothing to click about a modifier: ⇧⏎ describes the key alone.
-				hint([["⏎", "file", () => commit()], ["⇧⏎", "newline"],
-					["⇧⇥", "back", () => setStage(1)], ["Esc", "cancel", back]]);
+				hint([["⏎", done, () => commit()], ["⇧⏎", "newline"]]
+					.concat(job.only ? [] : [["⇧⇥", "back", () => setStage(1)]])
+					.concat([["Esc", "cancel", back]]));
 			}
 		};
 
@@ -2646,8 +2667,10 @@ function build(w) {
 			stage = Math.max(0, Math.min(2, s));
 			reach = Math.max(reach, stage);
 			armed = false;
-			tRow.style.display = reach >= 1 ? "" : "none";
-			nRow.style.display = reach >= 2 ? "" : "none";
+			// A job with one purpose shows one row: a note box does not want a
+			// tag box sitting on top of it.
+			tRow.style.display = (job.only ? stage === 1 : reach >= 1) ? "" : "none";
+			nRow.style.display = (job.only ? stage === 2 : reach >= 2) ? "" : "none";
 			cDrop.style.display = stage === 0 ? "" : "none";
 			(stage === 0 ? cIn : stage === 1 ? tIn : nIn).focus();
 			panelHints();
@@ -2690,6 +2713,12 @@ function build(w) {
 			}
 			if (e.key === "Tab") {
 				e.preventDefault(); e.stopPropagation();
+				// A single-purpose panel has nowhere to tab to, but Tab still
+				// finishes the tag you are part-way through typing.
+				if (job.only) {
+					if (stage === 1 && tIn.value.trim()) takeTag();
+					return;
+				}
 				if (e.shiftKey) return setStage(stage - 1);
 				// Tab takes the row you are on with you: the highlighted
 				// collection, or the tag you are part-way through typing. Only an
@@ -2780,9 +2809,9 @@ function build(w) {
 			switch (e.key) {
 				case "ArrowLeft": e.preventDefault(); return prev();
 				case "ArrowRight": e.preventDefault(); return next();
-				case "m": e.preventDefault(); return openPanel(manageJob(0, true));
-				case "t": e.preventDefault(); return openPanel(manageJob(1, false));
-				case "n": e.preventDefault(); return openPanel(manageJob(2, false));
+				case "m": e.preventDefault(); return openPanel(manageJob("move", current()));
+				case "t": e.preventDefault(); return openPanel(manageJob("tags", current()));
+				case "n": e.preventDefault(); return openPanel(manageJob("note", current()));
 				case "x": e.preventDefault(); return doTrash();
 				case "s": case "f": e.preventDefault(); return;
 				default: break;
