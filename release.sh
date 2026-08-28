@@ -1,9 +1,23 @@
 #!/usr/bin/env bash
 # Cut a release: build the .xpi, regenerate update.json from manifest.json,
 # commit, push, and publish a GitHub release with the .xpi attached.
-# Bump "version" in manifest.json first, then run ./release.sh
+# Bump "version" in manifest.json first, then run ./release.sh [note...]
+# Each note becomes a changelog bullet — needed for work this script commits
+# itself, which has no commit subject of its own to be read off.
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# Anything still uncommitted gets swept into the release commit, and that
+# commit's subject is bookkeeping the changelog throws away — so without a note
+# the work would ship undescribed. Which is exactly what happened to v0.5.0.
+DIRTY=$(git status --porcelain -- . ":!manifest.json" ":!update.json")
+if [ -n "$DIRTY" ] && [ $# -eq 0 ]; then
+	echo "Uncommitted changes, and no release note to describe them:" >&2
+	echo "$DIRTY" >&2
+	echo >&2
+	echo "Commit them first, or: ./release.sh 'what changed' ['and this too']" >&2
+	exit 1
+fi
 
 REPO="ievlevpn/zotero-feed-riffle"
 XPI="feed-riffle.xpi"
@@ -30,8 +44,13 @@ const out = { addons: { [z.id]: { updates: [{
 fs.writeFileSync("update.json", JSON.stringify(out, null, 2) + "\n");
 '
 
-git add manifest.json bootstrap.js update.json locale icon.svg katex.min.js katex.min.css fonts
-git commit -m "Release v$VER" || echo "(nothing to commit)"
+git add manifest.json bootstrap.js release.sh update.json locale icon.svg katex.min.js katex.min.css fonts
+# The notes ride along in the commit body, as bullets, where the changelog below
+# reads them back out. An array, because an unquoted ${BODY:+...} would split a
+# note on its spaces into one -m argument per word.
+MSG=(-m "Release v$VER")
+if [ $# -gt 0 ]; then MSG+=(-m "$(printf -- '- %s\n' "$@")"); fi
+git commit "${MSG[@]}" || echo "(nothing to commit)"
 git push
 
 # Changelog = commits since the previous tag (drop the "Release vX" commits).
@@ -40,7 +59,10 @@ git push
 git fetch --tags -q || true
 PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
 RANGE=${PREV:+$PREV..HEAD}
-CHANGES=$(git log --no-merges --pretty='- %s' $RANGE | grep -v '^- Release v' || true)
+# Subjects, plus any body line already written as a bullet — which is how the
+# release commit's own notes get in. Everything else in a body is prose for
+# readers of the log, not a changelog line.
+CHANGES=$(git log --no-merges --pretty='- %s%n%b' $RANGE | grep '^- ' | grep -v '^- Release v' || true)
 [ -z "$CHANGES" ] && CHANGES="- Initial release"
 
 NOTES="## What's changed

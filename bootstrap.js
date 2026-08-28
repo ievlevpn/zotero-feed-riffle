@@ -334,6 +334,30 @@ function ensureKatexCSS(w) {
 // KaTeX's output is markup we generated ourselves, so it is parsed straight in
 // rather than sanitized — and it is built from `tex` with trust:false, which is
 // what keeps a feed from smuggling anything through it.
+// An equation number belongs beside the equation, not on top of it. KaTeX puts
+// \tag inside .katex-html and pins it absolutely at the right edge, where any
+// equation wide enough to reach it ends up underneath. Lift it out to sit as
+// the display block's own last child, and the two become a flex row: maths in a
+// strip that scrolls if it must, number parked at the margin.
+function liftTag(frag) {
+	safe(() => {
+		for (const box of frag.querySelectorAll(".katex-display")) {
+			const tag = box.querySelector(":scope > .katex > .katex-html > .tag");
+			if (!tag) continue;
+			// A number on one side only would shove the equation off centre, and
+			// a numbered display would no longer line up with an unnumbered one.
+			// An invisible copy on the other side is what keeps it centred on
+			// the measure, the way it sits on a page.
+			const spacer = tag.cloneNode(true);
+			spacer.className = "tag spacer";
+			spacer.setAttribute("aria-hidden", "true");
+			box.prepend(spacer);
+			box.append(tag);
+			box.classList.add("tagged");
+		}
+	});
+}
+
 function katexFragment(doc, html) {
 	return safe(() => {
 		const parsed = new doc.defaultView.DOMParser().parseFromString(html, "text/html");
@@ -369,7 +393,7 @@ function mathInto(doc, parent, tex, display) {
 			displayMode: !!display, throwOnError: false, strict: false, trust: false,
 		}), null);
 		const frag = html && katexFragment(doc, html);
-		if (frag) { parent.append(frag); return; }
+		if (frag) { liftTag(frag); parent.append(frag); return; }
 	}
 	// KaTeX missing or refused it: the source reads better than nothing.
 	parent.append(typography(deLatex(tex)));
@@ -931,9 +955,11 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	background:color-mix(in srgb, Highlight 16%, Canvas);
 	color:color-mix(in srgb, Highlight 80%, CanvasText); }
 
-/* Whatever tags the feed itself supplied. */
+/* Whatever tags the feed itself supplied. Scoped to the row: KaTeX gives an
+ * equation number the class "tag" too, and a bare .tag rule dressed those up as
+ * chips — a bordered pill sitting on top of the formula it numbers. */
 .tags { display:flex; flex-wrap:wrap; gap:.3rem; margin:-.9rem auto 1.45rem; }
-.tag { font-size:.72rem; padding:.1em .5em; border-radius:1em; color:GrayText;
+.tags .tag { font-size:.72rem; padding:.1em .5em; border-radius:1em; color:GrayText;
 	background:color-mix(in srgb, GrayText 13%, Canvas);
 	border:1px solid color-mix(in srgb, GrayText 28%, Canvas); }
 
@@ -980,6 +1006,15 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 /* A long equation scrolls in its own strip rather than widening the card. */
 .abs .katex-display { margin:1em 0; overflow-x:auto; overflow-y:hidden;
 	padding:.15em 0; }
+/* Numbered: the number keeps its own column at the right margin — where a
+ * paper puts it — and the maths scrolls inside what is left, so the two can
+ * never collide however wide the equation is. liftTag() moved it out here. */
+.abs .katex-display.tagged { display:flex; align-items:center; gap:1.2em;
+	overflow:visible; }
+.abs .katex-display.tagged > .katex { flex:1; min-width:0;
+	overflow-x:auto; overflow-y:hidden; }
+.abs .katex-display.tagged > .tag { flex:none; color:GrayText; }
+.abs .katex-display.tagged > .tag.spacer { visibility:hidden; }
 /* KaTeX marks what it could not parse with inline red; !important is what it
  * takes to override that. Muted rather than alarming: a feed's LaTeX is often
  * half-broken, and the source is still readable underneath. */
