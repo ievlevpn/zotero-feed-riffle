@@ -1677,11 +1677,27 @@ function build(w) {
 	// underneath. Skip and undo have no ghost, so they get a slide of their own.
 	const advance = (entry) => { dir = entry === undefined ? "from-right" : entry; cursor++; render(); };
 
+	// The deck turns in the same frame the ghost starts moving, not when the
+	// write lands. Waiting made the two directions look different: filing does
+	// more database work than discarding, so its ghost slid clear of a card
+	// that was still the one it had just taken away, and the swap came after.
+	// Now the ghost always uncovers the next card, whichever way you sent it.
+	const step = (way) => { flick(way); advance(""); };
+	// Nothing is lost when a write fails — the feed item stays unread — but the
+	// card you were on has already left, so put it back.
+	const stepBack = (e, what) => {
+		oops(e);
+		flash(what + " failed — see the error console");
+		dir = "from-left";
+		cursor = Math.max(0, cursor - 1);
+		render();
+	};
+
 	const doDiscard = () => {
 		const item = current();
 		if (!item || busy) return;
-		flick("left");
-		guard(discard(item).then(() => advance(""))).catch(oops);
+		step("left");
+		guard(discard(item)).catch((e) => stepBack(e, "Discard"));
 	};
 
 	// Most items go to a handful of places, so the handful get a number each.
@@ -1693,9 +1709,9 @@ function build(w) {
 		if (!id) return flash("No recent collection " + n);
 		const path = (colls.find((c) => c.id === id) || {}).path;
 		if (!path) return flash("That collection is gone");
-		flick("right");
-		guard(keep(item, id, [], "").then(() => { flash("→ " + path); advance(""); }))
-			.catch((e) => { oops(e); flash("Save failed — see the error console"); });
+		step("right");
+		guard(keep(item, id, [], "").then(() => flash("→ " + path)))
+			.catch((e) => stepBack(e, "Save"));
 	};
 
 	// The third outcome. Deciding on every single card is what turns a backlog
@@ -2018,13 +2034,11 @@ function build(w) {
 				.filter((t, i, a) => t && a.indexOf(t) === i);
 			const feedItem = item;
 			closePanel();
-			flick("right");
+			step("right");
 			guard(keep(feedItem, c.id, finalTags, nIn.value.trim(), dropOld)
-				.then((dropped) => {
-					flash("→ " + c.path + (dropped ? " (old one trashed)" : ""));
-					advance("");
-				}))
-				.catch((e) => { oops(e); flash("Save failed — see the error console"); });
+				.then((dropped) =>
+					flash("→ " + c.path + (dropped ? " (old one trashed)" : ""))))
+				.catch((e) => stepBack(e, "Save"));
 		}
 
 		// Keys inside the panel never reach the card handler: stopPropagation on
