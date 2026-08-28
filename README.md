@@ -79,15 +79,16 @@ each. Pick one to riffle just that feed, or *All feeds* for everything at once.
 the full collection path, so `prs` finds *Probability / SPDEs* and
 `paths rough` finds *Probability / Rough paths*.
 
-<kbd>Tab</kbd> instead of <kbd>Enter</kbd> opens a tag box. It fuzzy-completes
-your existing tags, but what you typed is what you get: a suggestion only wins
-once you go to it with <kbd>↑</kbd><kbd>↓</kbd> or the mouse, since a tag you
-are inventing often starts out looking like one you already have.
-<kbd>Enter</kbd> commits the tag; on an empty box it moves on to the note rather
-than filing, so a stray second <kbd>Enter</kbd> cannot save the item early.
-<kbd>Tab</kbd> again opens the note box, where <kbd>Enter</kbd> files and
-<kbd>Shift</kbd>+<kbd>Enter</kbd> makes a newline. <kbd>Esc</kbd> steps back one
-row at a time.
+<kbd>Tab</kbd> instead of <kbd>Enter</kbd> accepts the highlighted collection —
+the box then reads it back to you — and opens a tag box, which fuzzy-completes
+your existing tags. <kbd>Enter</kbd> commits a tag, taking the highlighted
+suggestion when there is one; <kbd>Shift</kbd>+<kbd>Enter</kbd> commits the words
+exactly as typed, which is how you make a tag that merely looks like one you
+already have. <kbd>Enter</kbd> on an empty box files the item. <kbd>Tab</kbd>
+again opens the note box, where <kbd>Enter</kbd> files and
+<kbd>Shift</kbd>+<kbd>Enter</kbd> makes a newline. <kbd>Shift</kbd>+<kbd>Tab</kbd>
+moves back a row and <kbd>Esc</kbd> steps back one at a time; either way the row
+you return to opens its own fuzzy list again.
 
 ## How it stores things
 

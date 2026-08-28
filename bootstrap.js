@@ -228,14 +228,6 @@ function foldLibraryRows(rows) {
 	return keys;
 }
 
-// Moving through a list that has a "what I typed" slot in front of its first
-// row. That slot is -1, and arrowing off either end lands back on it, so the
-// text you wrote is always one keypress away. Exported for test.js.
-function ringSel(cur, d, n) {
-	const size = n + 1;
-	return ((cur + 1 + d + size) % size) - 1;
-}
-
 // "2 notes and 14 annotations" — what the old copy is worth keeping for, and
 // the whole of what the question about it can tell you. Exported for test.js.
 function heldPhrase(notes, annots) {
@@ -1946,7 +1938,13 @@ function build(w) {
 		const ordered = colls.slice().sort((a, b) => place(a) - place(b));
 
 		const tags = [];
-		let stage = 0; // 0 collection, 1 + tags, 2 + note
+		// Two different things, and conflating them was a trap: reach is how far
+		// the rows have been revealed, stage is which one has the focus. Click
+		// back into the collection box after tabbing on to tags and the stage
+		// follows you there — its dropdown used to stay shut, with no way left
+		// to reopen it — while the tag row you already opened stays put.
+		let stage = 0; // 0 collection, 1 tags, 2 note
+		let reach = 0;
 
 		// -- collection row
 		const cRow = el(doc, "div", "row");
@@ -1998,6 +1996,17 @@ function build(w) {
 
 		const chosen = () => shown[sel] || null;
 
+		// Tabbing on is accepting the row you are on: the box then reads the
+		// collection you picked rather than the letters you typed at it.
+		const takeCollection = () => {
+			const c = chosen();
+			if (!c) return;
+			cIn.value = c.path;
+			shown = [c];
+			sel = 0;
+			paintDrop();
+		};
+
 		// -- tags row (revealed on the first Tab)
 		const tRow = el(doc, "div", "row");
 		tRow.style.display = "none";
@@ -2011,11 +2020,7 @@ function build(w) {
 		panel.append(tRow);
 
 		let tShown = [];
-		// -1: nothing in the list is chosen, so Enter takes what you typed. A
-		// suggestion only wins once you go to it with ↑↓ or the mouse — matching
-		// something halfway is not the same as meaning it, and a tag you are
-		// inventing usually starts out looking like one you already have.
-		let tSel = -1;
+		let tSel = 0;
 
 		const paintChips = () => {
 			chips.replaceChildren();
@@ -2055,13 +2060,16 @@ function build(w) {
 		};
 
 		// Move whatever is typed (or highlighted in the dropdown) into a chip.
-		const takeTag = () => {
+		// Enter takes the highlighted suggestion; Shift+Enter (literal) takes the
+		// words as they stand, which is how you make a tag that merely looks
+		// like one you already have.
+		const takeTag = (literal) => {
 			const { done, partial } = splitTags(tIn.value);
 			for (const t of done) if (!tags.includes(t)) tags.push(t);
-			const pick = (tSel >= 0 && tShown[tSel]) || partial;
+			const pick = (!literal && tShown[tSel]) || partial;
 			if (pick && !tags.includes(pick)) tags.push(pick);
 			tIn.value = "";
-			tSel = -1;
+			tSel = 0;
 			paintChips();
 			paintTagDrop();
 		};
@@ -2077,8 +2085,12 @@ function build(w) {
 		panel.append(nRow);
 
 		// Escape means "back one row", and only closes from the first one — same
-		// as the key does.
-		const back = () => (stage > 0 ? setStage(stage - 1) : closePanel());
+		// as the key does. It puts the row away, rather than only leaving it.
+		const back = () => {
+			if (stage === 0) return closePanel();
+			reach = stage - 1;
+			setStage(stage - 1);
+		};
 		const pick = () => {
 			if (!shown.length) return;
 			sel = (sel + 1) % shown.length;
@@ -2086,13 +2098,16 @@ function build(w) {
 		};
 		const panelHints = () => {
 			if (stage === 0) {
-				hint([["⏎", "file here", () => commit()], ["⇥", "add tags", () => setStage(1)],
+				hint([["⏎", "file here", () => commit()],
+					["⇥", "add tags", () => { takeCollection(); setStage(1); }],
 					["↑↓", "pick", pick], ["Esc", "back", back]]);
 			} else if (stage === 1) {
-				hint([["⏎", tIn.value.trim() ? "add tag" : "add note",
-					() => (tIn.value.trim() ? takeTag() : setStage(2))],
-					["⇥", "add note", () => setStage(2)],
-					["⇧⇥", "back", () => setStage(0)], ["Esc", "cancel", back]]);
+				const typed = !!tIn.value.trim();
+				hint([["⏎", typed ? "add tag" : "file",
+					() => (typed ? takeTag() : commit())]]
+					.concat(typed ? [["⇧⏎", "as new tag", () => takeTag(true)]] : [])
+					.concat([["⇥", "add note", () => setStage(2)],
+						["⇧⇥", "back", () => setStage(0)], ["Esc", "cancel", back]]));
 			} else {
 				// Nothing to click about a modifier: ⇧⏎ describes the key alone.
 				hint([["⏎", "file", () => commit()], ["⇧⏎", "newline"],
@@ -2102,12 +2117,22 @@ function build(w) {
 
 		const setStage = (s) => {
 			stage = Math.max(0, Math.min(2, s));
-			tRow.style.display = stage >= 1 ? "" : "none";
-			nRow.style.display = stage >= 2 ? "" : "none";
+			reach = Math.max(reach, stage);
+			tRow.style.display = reach >= 1 ? "" : "none";
+			nRow.style.display = reach >= 2 ? "" : "none";
 			cDrop.style.display = stage === 0 ? "" : "none";
 			(stage === 0 ? cIn : stage === 1 ? tIn : nIn).focus();
 			panelHints();
 		};
+		// Clicking straight into a box is the same as tabbing to it.
+		[cIn, tIn, nIn].forEach((box, i) =>
+			box.addEventListener("focus", () => {
+				if (stage !== i) setStage(i);
+				// Tab accepted a whole path into this box; typing over it should
+				// search afresh rather than append to something that matches
+				// nothing.
+				if (box === cIn) cIn.select();
+			}));
 
 		const closePanel = () => {
 			if (!panel) return;
@@ -2137,20 +2162,20 @@ function build(w) {
 		const panelKeys = (e) => {
 			if (e.key === "Escape") {
 				e.preventDefault(); e.stopPropagation();
-				if (stage > 0) return setStage(stage - 1);
-				return closePanel();
+				return back();
 			}
 			if (e.key === "Tab") {
 				e.preventDefault(); e.stopPropagation();
+				if (stage === 0 && !e.shiftKey) takeCollection();
 				return setStage(stage + (e.shiftKey ? -1 : 1));
 			}
 			if (e.key === "Enter") {
 				if (stage === 2 && e.shiftKey) return; // newline in the note
 				e.preventDefault(); e.stopPropagation();
-				// In the tag box Enter is only ever about tags: it takes what you
-				// typed, and on an empty box moves on to the note. Filing from
-				// here is what made a stray second Enter save the item early.
-				if (stage === 1) return tIn.value.trim() ? takeTag() : setStage(2);
+				// In the tag box a bare Enter finishes a tag — the highlighted
+				// suggestion if there is one — and Shift+Enter takes the words as
+				// typed instead. An empty box means you are done tagging.
+				if (stage === 1 && tIn.value.trim()) return takeTag(e.shiftKey);
 				return commit();
 			}
 			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -2163,7 +2188,7 @@ function build(w) {
 				}
 				if (stage === 1 && tShown.length) {
 					e.preventDefault(); e.stopPropagation();
-					tSel = ringSel(tSel, d, tShown.length);
+					tSel = (tSel + d + tShown.length) % tShown.length;
 					return paintTagDrop();
 				}
 				return; // note box: let the caret move
@@ -2173,7 +2198,14 @@ function build(w) {
 
 		panel.addEventListener("keydown", panelKeys);
 		cIn.addEventListener("input", filter);
-		tIn.addEventListener("input", () => { tSel = -1; paintChips(); paintTagDrop(); });
+		// panelHints too: at this row the hint names what Enter will do with what
+		// is in the box, and that changes with every keystroke.
+		tIn.addEventListener("input", () => {
+			tSel = 0;
+			paintChips();
+			paintTagDrop();
+			panelHints();
+		});
 
 		filter();
 		paintChips();
@@ -2299,5 +2331,5 @@ if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
-		heldPhrase, ringSel };
+		heldPhrase };
 }
