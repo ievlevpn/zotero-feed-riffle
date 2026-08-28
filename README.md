@@ -120,6 +120,11 @@ another, <kbd>Enter</kbd> saves, and the card redraws with what it now carries.
 it in Zotero's trash. Each panel shows its own row and nothing else.
 <kbd>u</kbd> undoes any of it — a trashed or moved card comes back to its own
 place in the deck, and a tag edit is restored exactly, automatic tags included.
+<kbd>o</kbd> opens the item's own file in Zotero's reader, and falls back to the
+link when there is no file — which is every feed card, so nothing changes there.
+
+Tags Zotero has given a colour keep it, on the card and in the tag box, and come
+first in its order, the way they do in the items list.
 
 The finish summary counts in the same terms: *6 of 24 seen, 18 still to look at*
 and *5 changed · 1 trashed · 12 min*.

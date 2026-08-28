@@ -1057,6 +1057,32 @@ async function keep(feedItem, collectionID, tags, note, dropOld) {
 	return !!trashed;
 }
 
+// Zotero paints a handful of tags a colour of their own and puts them ahead of
+// the rest. A card that shows tags should show the same ones the same way, so
+// "Important" is as red here as it is in the items list.
+function tagColor(libraryID, name) {
+	return safe(() => Zotero.Tags.getColor(libraryID, name), false) || null;
+}
+
+// Coloured first, in Zotero's own order — sort is stable, so everything else
+// keeps the order it arrived in.
+function orderTags(libraryID, names) {
+	const at = (n) => {
+		const c = tagColor(libraryID, n);
+		return c && Number.isInteger(c.position) ? c.position : 999;
+	};
+	return names.slice().sort((a, b) => at(a) - at(b));
+}
+
+// The colour goes on as a wash rather than a block: these sit in running text
+// and beside each other, and a row of solid colour would shout over the card.
+function paintTag(node, color) {
+	if (!color) return;
+	node.style.borderColor = color;
+	node.style.background = "color-mix(in srgb, " + color + " 20%, Canvas)";
+	node.style.color = "color-mix(in srgb, " + color + " 70%, CanvasText)";
+}
+
 // --- managing a collection -------------------------------------------------
 
 // The tags the item should end up with, rather than a list to add: a chip you
@@ -2083,10 +2109,16 @@ function build(w) {
 
 		// The item's own tags: what the feed put there, or what you just did with
 		// t. Nothing inferred from the title, the collection or anything else.
-		const feedTags = safe(() => item.getTags(), []).map((t) => t.tag).filter(Boolean);
+		const feedTags = orderTags(item.libraryID,
+			safe(() => item.getTags(), []).map((t) => t.tag).filter(Boolean));
 		if (feedTags.length) {
 			const row = el(doc, "div", "tags");
-			for (const t of feedTags) row.append(el(doc, "span", "tag", t));
+			for (const t of feedTags) {
+				const chip = el(doc, "span", "tag", t);
+				const c = tagColor(item.libraryID, t);
+				paintTag(chip, c && c.color);
+				row.append(chip);
+			}
 			cardBox.append(row);
 		}
 
@@ -2281,10 +2313,21 @@ function build(w) {
 		reload().catch(oops);
 	};
 
+	// The item itself when there is one to open — Zotero's own reader, on the
+	// attachment it would open from the items list — and the link only when
+	// there is no file. A feed card never has one, so it always takes the link.
 	const openURL = () => {
 		const item = current();
-		const url = item && item.getField("url");
-		if (url) safe(() => Zotero.launchURL(url));
+		if (!item) return;
+		const url = item.getField("url");
+		const link = () => { if (url) safe(() => Zotero.launchURL(url)); };
+		if (safe(() => item.isFeedItem, false)) return link();
+		guard(item.getBestAttachment().then((att) => {
+			if (!att) return link();
+			const pane = safe(() => Zotero.getMainWindow().ZoteroPane, null);
+			if (pane) return pane.viewAttachment(att.id);
+			link();
+		})).catch((e) => { oops(e); link(); });
 	};
 
 	// --- the filing panel --------------------------------------------------
@@ -2317,7 +2360,9 @@ function build(w) {
 		start: kind === "tags" ? 1 : kind === "note" ? 2 : 0,
 		// The tags it already has, so the panel is what the item looks like
 		// rather than a list of additions.
-		tags: kind === "tags" ? safe(() => item.getTags(), []).map((t) => t.tag) : [],
+		tags: kind === "tags"
+			? orderTags(item.libraryID, safe(() => item.getTags(), []).map((t) => t.tag))
+			: [],
 		run: (card, c, tags, note) => {
 			const at = cursor;
 			guard((async () => {
@@ -2554,6 +2599,12 @@ function build(w) {
 			tags.forEach((name, i) => {
 				const last = i === tags.length - 1;
 				const chip = el(doc, "span", armed && last ? "chip on" : "chip", name);
+				// Not while it is armed: that one is wearing the highlight that
+				// says Backspace will take it off.
+				if (!(armed && last)) {
+					const c = tagColor(item.libraryID, name);
+					paintTag(chip, c && c.color);
+				}
 				const x = el(doc, "button", null, "×");
 				x.title = "Remove";
 				x.addEventListener("mousedown", (e) => {
@@ -2579,6 +2630,8 @@ function build(w) {
 			tDrop.style.display = "";
 			tShown.forEach((name, i) => {
 				const row = el(doc, "div", i === tSel ? "on" : null, name);
+				const c = i === tSel ? null : tagColor(item.libraryID, name);
+				if (c && c.color) row.style.color = c.color;
 				row.addEventListener("mousedown", (e) => {
 					e.preventDefault();
 					tSel = i;
