@@ -228,6 +228,14 @@ function foldLibraryRows(rows) {
 	return keys;
 }
 
+// Moving through a list that has a "what I typed" slot in front of its first
+// row. That slot is -1, and arrowing off either end lands back on it, so the
+// text you wrote is always one keypress away. Exported for test.js.
+function ringSel(cur, d, n) {
+	const size = n + 1;
+	return ((cur + 1 + d + size) % size) - 1;
+}
+
 // "2 notes and 14 annotations" — what the old copy is worth keeping for, and
 // the whole of what the question about it can tell you. Exported for test.js.
 function heldPhrase(notes, annots) {
@@ -2003,7 +2011,11 @@ function build(w) {
 		panel.append(tRow);
 
 		let tShown = [];
-		let tSel = 0;
+		// -1: nothing in the list is chosen, so Enter takes what you typed. A
+		// suggestion only wins once you go to it with ↑↓ or the mouse — matching
+		// something halfway is not the same as meaning it, and a tag you are
+		// inventing usually starts out looking like one you already have.
+		let tSel = -1;
 
 		const paintChips = () => {
 			chips.replaceChildren();
@@ -2046,10 +2058,10 @@ function build(w) {
 		const takeTag = () => {
 			const { done, partial } = splitTags(tIn.value);
 			for (const t of done) if (!tags.includes(t)) tags.push(t);
-			const pick = (tShown[tSel] && partial) ? tShown[tSel] : partial;
+			const pick = (tSel >= 0 && tShown[tSel]) || partial;
 			if (pick && !tags.includes(pick)) tags.push(pick);
 			tIn.value = "";
-			tSel = 0;
+			tSel = -1;
 			paintChips();
 			paintTagDrop();
 		};
@@ -2077,8 +2089,8 @@ function build(w) {
 				hint([["⏎", "file here", () => commit()], ["⇥", "add tags", () => setStage(1)],
 					["↑↓", "pick", pick], ["Esc", "back", back]]);
 			} else if (stage === 1) {
-				hint([["⏎", tIn.value.trim() ? "add tag" : "file",
-					() => (tIn.value.trim() ? takeTag() : commit())],
+				hint([["⏎", tIn.value.trim() ? "add tag" : "add note",
+					() => (tIn.value.trim() ? takeTag() : setStage(2))],
 					["⇥", "add note", () => setStage(2)],
 					["⇧⇥", "back", () => setStage(0)], ["Esc", "cancel", back]]);
 			} else {
@@ -2135,9 +2147,10 @@ function build(w) {
 			if (e.key === "Enter") {
 				if (stage === 2 && e.shiftKey) return; // newline in the note
 				e.preventDefault(); e.stopPropagation();
-				// In the tag box a bare Enter means "finish this tag"; an empty
-				// box means you are done tagging and want the item filed.
-				if (stage === 1 && tIn.value.trim()) return takeTag();
+				// In the tag box Enter is only ever about tags: it takes what you
+				// typed, and on an empty box moves on to the note. Filing from
+				// here is what made a stray second Enter save the item early.
+				if (stage === 1) return tIn.value.trim() ? takeTag() : setStage(2);
 				return commit();
 			}
 			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -2150,7 +2163,7 @@ function build(w) {
 				}
 				if (stage === 1 && tShown.length) {
 					e.preventDefault(); e.stopPropagation();
-					tSel = (tSel + d + tShown.length) % tShown.length;
+					tSel = ringSel(tSel, d, tShown.length);
 					return paintTagDrop();
 				}
 				return; // note box: let the caret move
@@ -2160,7 +2173,7 @@ function build(w) {
 
 		panel.addEventListener("keydown", panelKeys);
 		cIn.addEventListener("input", filter);
-		tIn.addEventListener("input", () => { tSel = 0; paintChips(); paintTagDrop(); });
+		tIn.addEventListener("input", () => { tSel = -1; paintChips(); paintTagDrop(); });
 
 		filter();
 		paintChips();
@@ -2286,5 +2299,5 @@ if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
-		heldPhrase };
+		heldPhrase, ringSel };
 }
