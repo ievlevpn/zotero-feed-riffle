@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, noteHTML } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -295,12 +295,15 @@ assert.strictEqual(imgMath(""), null);
 assert.strictEqual(fmtSpan(38000), "38 s");
 assert.strictEqual(fmtSpan(6 * 60 * 1000), "6 min");
 assert.strictEqual(fmtSpan(65 * 60 * 1000), "1 h 05 min", "padded, so the column lines up");
-assert.strictEqual(summaryLine(8, 4, 3, 6 * 60 * 1000),
+assert.strictEqual(summaryLine([[8, "kept"], [4, "discarded"], [3, "skipped"]], 6 * 60 * 1000),
 	"8 kept · 4 discarded · 3 skipped · 6 min · 24 s a card");
-assert.strictEqual(summaryLine(2, 0, 0, 30000), "2 kept · 30 s",
-	"nothing discarded, nothing skipped: neither is printed, and two cards set no pace");
-assert.strictEqual(summaryLine(0, 0, 0, 0), "",
+assert.strictEqual(summaryLine([[2, "kept"], [0, "discarded"]], 30000), "2 kept · 30 s",
+	"a count of nothing is not printed, and two cards set no pace");
+assert.strictEqual(summaryLine([[0, "kept"], [0, "discarded"]], 0), "",
 	"a window opened and closed again has nothing to say");
+assert.strictEqual(summaryLine([[6, "changed"], [1, "trashed"]], 5 * 60 * 1000),
+	"6 changed · 1 trashed · 5 min · 43 s a card",
+	"a collection deck counts what it did, in its own words");
 assert.strictEqual(deckLine(21, 24, 3, 0), "21 of 24 cleared, 3 skipped for later.",
 	"the deck ran out: nothing is left unread");
 assert.strictEqual(deckLine(17, 24, 3, 4),
@@ -327,3 +330,10 @@ assert.strictEqual(deckLine(0, 0, 0, 0), "Nothing unread.");
 assert.deepStrictEqual(
 	splitMath("half an \\begin{align*} equation").map((r) => r.math), [false],
 	"an environment that never ends is left alone rather than swallowing the rest");
+
+// --- riffling a collection is reading, so the sentence counts differently --
+assert.strictEqual(seenLine(24, 24, 0), "24 of 24 seen.");
+assert.strictEqual(seenLine(6, 24, 18), "6 of 24 seen, 18 still to look at.");
+assert.strictEqual(seenLine(0, 0, 0), "Nothing here.");
+assert.strictEqual(noteHTML("one\ntwo <b> & three"),
+	"<p>one</p><p>two &lt;b&gt; &amp; three</p>", "a typed note is text, never markup");

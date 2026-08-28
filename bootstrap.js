@@ -52,6 +52,12 @@ let colls = [];        // [{ id, path }] every collection you can file into
 let allTags = [];      // every tag name in the library, for the tag picker
 let undoStack = [];    // {id, revert} — revert absent for a discard or a skip
 let scopeLib = null;   // feed libraryID to riffle, or null for every feed
+let scopeColl = null;  // collection id to riffle instead, when riffling one
+// Which deck is on screen. Everything around the cards — the window, the
+// typography, the panel, undo, the animation — is the same either way; a mode
+// is only the handful of places where a feed and a collection differ.
+let mode = "feed";     // "feed" or "collection"
+const isFeedMode = () => mode === "feed";
 let libKeys = new Map(); // DOI/arXiv key → the { id, colls } already in the library
 const RIFFLE_ATTR = "data-feed-riffle"; // marks our window, across installs
 let fontScale = 1;     // multiplier on top of Zotero's font size, persisted
@@ -286,6 +292,15 @@ function deckLine(cleared, total, skipped, left) {
 	return parts.join(", ") + ".";
 }
 
+// The same, for a collection you were reading rather than clearing: "24 of 24
+// seen." Exported for test.js.
+function seenLine(seen, total, left) {
+	if (!total) return "Nothing here.";
+	const parts = [Math.min(seen, total) + " of " + total + " seen"];
+	if (left) parts.push(left + " still to look at");
+	return parts.join(", ") + ".";
+}
+
 // A span at a glance: "38 s", "6 min", "1 h 04 min". Exported for test.js.
 function fmtSpan(ms) {
 	const secs = Math.max(0, Math.round(ms / 1000));
@@ -295,15 +310,14 @@ function fmtSpan(ms) {
 	return Math.floor(mins / 60) + " h " + String(mins % 60).padStart(2, "0") + " min";
 }
 
-// The sitting in one line. The pace is only worth printing once there are
-// enough cards behind it to mean anything. Exported for test.js.
-function summaryLine(kept, dropped, skipped, ms) {
-	const done = kept + dropped + skipped;
+// The sitting in one line, from [count, word] pairs — a feed deck keeps and
+// discards, a collection deck changes and trashes. The pace is only worth
+// printing once there are enough cards behind it to mean anything. Exported
+// for test.js.
+function summaryLine(counts, ms) {
+	const done = counts.reduce((n, c) => n + c[0], 0);
 	if (!done) return "";
-	const bits = [];
-	if (kept) bits.push(kept + " kept");
-	if (dropped) bits.push(dropped + " discarded");
-	if (skipped) bits.push(skipped + " skipped");
+	const bits = counts.filter(([n]) => n).map(([n, word]) => n + " " + word);
 	bits.push(fmtSpan(ms));
 	if (done >= 3 && ms >= 3000) bits.push(fmtSpan(ms / done) + " a card");
 	return bits.join(" · ");
@@ -811,6 +825,21 @@ async function loadIDs(libraryID) {
 	return (await Zotero.DB.columnQueryAsync(sql, args)) || [];
 }
 
+// The items of one collection, in the order the collections pane shows them:
+// what is in the collection itself, not what is filed below it, and regular
+// items only — an attachment or a note is not a card.
+async function loadCollectionIDs(collectionID) {
+	const c = safe(() => Zotero.Collections.get(collectionID), null);
+	if (!c) return [];
+	const ids = safe(() => c.getChildItems(true), []);
+	const items = await Zotero.Items.getAsync(ids);
+	await Zotero.Items.loadDataTypes(items, ["itemData"]);
+	return items
+		.filter((i) => safe(() => i.isRegularItem() && !i.deleted, false))
+		.sort((a, b) => String(b.dateAdded || "").localeCompare(String(a.dateAdded || "")))
+		.map((i) => i.id);
+}
+
 // Keep a window of items loaded around the cursor. Called on every advance;
 // the ones already in `cache` cost nothing.
 // Items outside the window around the cursor are dropped. Without this,
@@ -935,6 +964,14 @@ async function discard(item) {
 	undoStack.push({ id: item.id });
 }
 
+// A typed note as Zotero stores it: one paragraph a line, and nothing in the
+// text taken for markup. Exported for test.js.
+function noteHTML(text) {
+	return String(text || "").split(/\n/).map((line) =>
+		"<p>" + line.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])) + "</p>"
+	).join("");
+}
+
 // A local clone, not FeedItem#translate(). translate() loads the page in a
 // hidden browser and runs translators — seconds per item, and a progress
 // popup — which is exactly the clunkiness this plugin exists to avoid. The
@@ -987,9 +1024,7 @@ async function keep(feedItem, collectionID, tags, note, dropOld) {
 		const n = new Zotero.Item("note");
 		n.libraryID = libraryID;
 		n.parentItemID = item.id;
-		n.setNote(note.split(/\n/).map((line) =>
-			"<p>" + line.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])) + "</p>"
-		).join(""));
+		n.setNote(noteHTML(note));
 		await n.saveTx();
 	}
 
@@ -1022,6 +1057,59 @@ async function keep(feedItem, collectionID, tags, note, dropOld) {
 	return !!trashed;
 }
 
+// --- managing a collection -------------------------------------------------
+
+// Tags and a note on an item you already own. Undo takes back exactly what was
+// added here and nothing that was there before.
+async function annotate(item, tags, note) {
+	await Zotero.Items.loadDataTypes([item], ["tags"]);
+	const added = tags.filter((t) => item.addTag(t));
+	if (added.length) await item.saveTx();
+	let noteItem = null;
+	if (note) {
+		const n = new Zotero.Item("note");
+		n.libraryID = item.libraryID;
+		n.parentItemID = item.id;
+		n.setNote(noteHTML(note));
+		await n.saveTx();
+		noteItem = n;
+	}
+	return async () => {
+		if (noteItem) await safe(() => noteItem.eraseTx(), null);
+		if (!added.length) return;
+		await Zotero.Items.loadDataTypes([item], ["tags"]);
+		for (const t of added) item.removeTag(t);
+		await item.saveTx();
+	};
+}
+
+// Out of the collection you are riffling and into another one. The item itself
+// is untouched: a collection is a place it sits, not a copy of it.
+async function moveTo(item, fromID, toID) {
+	await Zotero.Items.loadDataTypes([item], ["collections"]);
+	if (toID === fromID) return () => Promise.resolve();
+	item.addToCollection(toID);
+	if (fromID) item.removeFromCollection(fromID);
+	await item.saveTx();
+	return async () => {
+		await Zotero.Items.loadDataTypes([item], ["collections"]);
+		item.removeFromCollection(toID);
+		if (fromID) item.addToCollection(fromID);
+		await item.saveTx();
+	};
+}
+
+// Zotero's trash, never erased: everything the item holds goes with it and
+// comes back whole, and Zotero empties the trash on its own schedule.
+async function trashItem(item) {
+	item.deleted = true;
+	await item.saveTx();
+	return async () => {
+		item.deleted = false;
+		await item.saveTx();
+	};
+}
+
 // One key on a keyboard-driven interface is one item gone from view, and at
 // riffling speed a mis-hit is a matter of when, not if.
 async function undo() {
@@ -1029,7 +1117,7 @@ async function undo() {
 	if (!last) return null;
 	if (last.revert) await last.revert();
 	const feedItem = await Zotero.Items.getAsync(last.id);
-	if (feedItem) {
+	if (feedItem && safe(() => feedItem.isFeedItem, false)) {
 		await feedItem.toggleRead(false);
 		// getAsync alone carries primary data. Caching that as-is meant the card
 		// undo stepped back to threw in getField() — the same trap as hydrate's.
@@ -1072,6 +1160,10 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	transition:background .12s; }
 .head .feed:hover { background:color-mix(in srgb, GrayText 20%, Canvas); }
 .head .feed::after { content:" ▾"; opacity:.65; }
+/* A collection deck has nothing to switch to, so the name is just a name. */
+.head .feed.plain { cursor:default; }
+.head .feed.plain:hover { background:none; }
+.head .feed.plain::after { content:none; }
 /* The done screen clears the name; without this its caret hangs there alone. */
 .head .feed:empty { padding:0; }
 .head .feed:empty::after { content:none; }
@@ -1506,10 +1598,24 @@ function closeOrphanWindows() {
 	});
 }
 
+function openCollection(collectionID) {
+	if (!collectionID) return;
+	mode = "collection";
+	scopeColl = collectionID;
+	scopeLib = null;
+	return openWindow();
+}
+
 function open(libraryID) {
+	mode = "feed";
+	scopeColl = null;
+	scopeLib = libraryID || null;
+	return openWindow();
+}
+
+function openWindow() {
 	const main = Zotero.getMainWindow();
 	if (!main) return;
-	scopeLib = libraryID || null;
 	if (win && !win.closed) {
 		// Already riffling: the tally carries on across feeds.
 		win.focus();
@@ -1567,7 +1673,7 @@ async function reload() {
 	paint(w, "Loading…");
 	try {
 		await loadKatex();
-		ids = await loadIDs(scopeLib);
+		ids = isFeedMode() ? await loadIDs(scopeLib) : await loadCollectionIDs(scopeColl);
 		total = ids.length;
 		cursor = 0;
 		cache.clear();
@@ -1598,7 +1704,6 @@ function build(w) {
 	// The feed name doubles as the scope control: it already says which feed you
 	// are in, so it is the obvious place to change it.
 	const feedName = el(doc, "span", "feed");
-	feedName.title = "Switch feed";
 	const count = el(doc, "span", "count");
 	head.append(feedName, count);
 	let menu = null; // the feed picker, when open
@@ -1612,7 +1717,7 @@ function build(w) {
 	};
 
 	const openFeeds = () => {
-		if (menu) return closeFeeds();
+		if (!isFeedMode() || menu) return closeFeeds();
 		const rows = feedRows();
 		if (rows.length < 2) return flash("No feeds");
 		menu = el(doc, "div", "feedpick");
@@ -1677,7 +1782,7 @@ function build(w) {
 		input.focus();
 	};
 
-	feedName.addEventListener("click", openFeeds);
+	feedName.addEventListener("click", () => { if (isFeedMode()) openFeeds(); });
 
 	const cardBox = el(doc, "div", "card");
 	// Links open in the real browser: this window is the riffle UI, and
@@ -1779,14 +1884,22 @@ function build(w) {
 
 	// The numbers file into recent collections without the panel; clicking that
 	// hint opens the panel, which is where those same collections are listed.
-	const cardHints = () => hint([
-		["←", "discard", doDiscard], ["→", "keep", openPanel], ["s", "skip", doSkip],
-		["u", "undo", doUndo], ["1–9", "recent", openPanel], ["f", "feed", openFeeds],
-		["o", "open", openURL],
-		["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
-			() => setScale(fontScale - SIZE_STEP)]],
-		["Esc", "close", stop],
-	]);
+	const cardHints = () => hint(isFeedMode()
+		? [["←", "discard", doDiscard], ["→", "keep", () => openPanel()],
+			["s", "skip", doSkip], ["u", "undo", doUndo],
+			["1–9", "recent", () => openPanel()], ["f", "feed", openFeeds],
+			["o", "open", openURL],
+			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
+				() => setScale(fontScale - SIZE_STEP)]],
+			["Esc", "close", stop]]
+		: [["←→", "move through", [prev, next]],
+			["t", "tags", () => openPanel(manageJob(1, false))],
+			["n", "note", () => openPanel(manageJob(2, false))],
+			["m", "move to", () => openPanel(manageJob(0, true))],
+			["x", "trash", doTrash], ["u", "undo", doUndo], ["o", "open", openURL],
+			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
+				() => setScale(fontScale - SIZE_STEP)]],
+			["Esc", "close", stop]]);
 
 	// --- the card ---------------------------------------------------------
 
@@ -1805,7 +1918,9 @@ function build(w) {
 	// you and the door, not a scoreboard — and it can be turned off from
 	// itself, with the way back in the same place and nowhere else.
 	function summaryBox(stopped) {
-		const line = summaryLine(stat.kept, stat.dropped, stat.skipped, stat.spent);
+		const line = summaryLine(isFeedMode()
+			? [[stat.kept, "kept"], [stat.dropped, "discarded"], [stat.skipped, "skipped"]]
+			: [[stat.kept, "changed"], [stat.dropped, "trashed"]], stat.spent);
 		if (!line) return null;
 		const quiet = (label, on) => {
 			const b = el(doc, "button", "quiet", label);
@@ -1840,7 +1955,9 @@ function build(w) {
 		const left = Math.max(0, ids.length - cursor);
 		done.append(
 			el(doc, "div", "big", total ? "✓" : "—"),
-			el(doc, "div", null, deckLine(Math.max(0, cursor - skipped), total, skipped, left)),
+			el(doc, "div", null, isFeedMode()
+				? deckLine(Math.max(0, cursor - skipped), total, skipped, left)
+				: seenLine(cursor, total, left)),
 		);
 
 		const sum = summaryBox(stopped);
@@ -1849,7 +1966,9 @@ function build(w) {
 		// Reaching the end of one feed is the moment you are most likely to want
 		// another, so the ones still waiting are offered here rather than left
 		// for you to go and find.
-		nextFeeds = feedRows().filter((r) => r.id !== null && r.n > 0 && r.id !== scopeLib);
+		nextFeeds = isFeedMode()
+			? feedRows().filter((r) => r.id !== null && r.n > 0 && r.id !== scopeLib)
+			: [];
 		nextSel = 0;
 		nextDrop = null;
 		if (nextFeeds.length) {
@@ -1919,7 +2038,13 @@ function build(w) {
 			return;
 		}
 
-		feedName.textContent = safe(() => Zotero.Libraries.get(item.libraryID).name, "");
+		// The name is a feed switcher on a feed deck and a label on a collection
+		// one: there is no other collection this deck could turn into.
+		feedName.className = isFeedMode() ? "feed" : "feed plain";
+		feedName.title = isFeedMode() ? "Switch feed" : "";
+		feedName.textContent = isFeedMode()
+			? safe(() => Zotero.Libraries.get(item.libraryID).name, "")
+			: safe(() => Zotero.Collections.get(scopeColl).name, "");
 		count.textContent = `${cursor + 1} / ${total}`;
 
 		// hyphens:auto does nothing without a language to hyphenate by. Feeds
@@ -1940,10 +2065,10 @@ function build(w) {
 		if (who) meta.append(el(doc, "span", "who", who));
 		const when = shortDate(item.getField("date"));
 		if (when) meta.append(el(doc, "span", "when", when));
-		if (kind) meta.append(el(doc, "span", "badge " + kind, kind));
+		if (kind && isFeedMode()) meta.append(el(doc, "span", "badge " + kind, kind));
 		// Matched on DOI or arXiv id, so a v2 announcement finds the v1 you
 		// already saved. Worth knowing before you decide what to do with it.
-		if (libraryCopy(item)) {
+		if (isFeedMode() && libraryCopy(item)) {
 			const have = el(doc, "span", "badge have", "in library");
 			have.title = "Filing this adds the copy you already have to the collection";
 			meta.append(have);
@@ -2014,6 +2139,47 @@ function build(w) {
 		render();
 	};
 
+	// Riffling a collection is reading, not deciding: the arrows only move.
+	const prev = () => {
+		if (busy || cursor <= 0) return;
+		statTick();
+		dir = "from-left";
+		cursor--;
+		render();
+	};
+	const next = () => {
+		if (busy || cursor >= ids.length) return;
+		statTick();
+		advance();
+	};
+
+	// Zotero's trash, so nothing is destroyed and undo puts it back in place.
+	const doTrash = () => {
+		const item = current();
+		if (!item || busy) return;
+		const at = cursor;
+		stat.dropped++;
+		statTick();
+		flick("left");
+		ids.splice(at, 1);
+		cache.delete(item.id);
+		render();
+		guard(trashItem(item).then((back) => {
+			undoStack.push({
+				id: item.id,
+				at,
+				revert: async () => { await back(); ids.splice(at, 0, item.id); },
+			});
+			flash("Trashed");
+		})).catch((e) => {
+			oops(e);
+			flash("Trash failed — see the error console");
+			ids.splice(at, 0, item.id);
+			cursor = at;
+			render();
+		});
+	};
+
 	const doDiscard = () => {
 		const item = current();
 		if (!item || busy) return;
@@ -2027,7 +2193,7 @@ function build(w) {
 	// The panel is still there for everything else.
 	const fileRecent = (n) => {
 		const item = current();
-		if (!item || busy) return;
+		if (!item || busy || !isFeedMode()) return;
 		const id = recentIDs()[n - 1];
 		if (!id) return flash("No recent collection " + n);
 		const path = (colls.find((c) => c.id === id) || {}).path;
@@ -2043,7 +2209,7 @@ function build(w) {
 	// into a wall; this leaves the item unread so it comes back another day.
 	const doSkip = () => {
 		const item = current();
-		if (!item || busy) return;
+		if (!item || busy || !isFeedMode()) return;
 		// Nothing to undo about a skip, but it still takes a place on the stack:
 		// without one, u would un-read an older item while stepping back to this
 		// card. toggleRead(false) on an item that was never read is a no-op.
@@ -2071,6 +2237,13 @@ function build(w) {
 			const kind = was.skip ? "skipped" : was.revert ? "kept" : "dropped";
 			stat[kind] = Math.max(0, stat[kind] - 1);
 			if (was.skip) skipped = Math.max(0, skipped - 1);
+			// A card taken out of the deck goes back where it was.
+			if (was.at !== undefined) {
+				dir = "from-left";
+				cursor = was.at;
+				render();
+				return flash("Undone");
+			}
 			dir = "from-left";
 			// The undone item is the one before the cursor, unless we already
 			// ran off the end — then it is the last card.
@@ -2110,16 +2283,64 @@ function build(w) {
 
 	// --- the filing panel --------------------------------------------------
 
-	function openPanel() {
+	// Filing a feed card: pick a collection, tags and a note, then keep it.
+	const fileJob = {
+		label: "File to",
+		pick: true,
+		start: 0,
+		run: (item, c, tags, note, dropOld) => {
+			stat.kept++;
+			statTick();
+			step("right");
+			guard(keep(item, c.id, tags, note, dropOld)
+				.then((dropped) =>
+					flash("→ " + c.path + (dropped ? " (old one trashed)" : ""))))
+				.catch((e) => stepBack(e, "Save"));
+		},
+	};
+
+	// The same rows over a collection: what is on the card stays where it is
+	// unless you name somewhere else for it to go.
+	const manageJob = (start, pick) => ({
+		label: "Move to",
+		pick,
+		start,
+		run: (item, c, tags, note) => {
+			const at = cursor;
+			guard((async () => {
+				const undos = [];
+				if (tags.length || note) undos.push(await annotate(item, tags, note));
+				if (c) undos.push(await moveTo(item, scopeColl, c.id));
+				if (!undos.length) return;
+				stat.kept++;
+				statTick();
+				undoStack.push({
+					id: item.id, keep: true,
+					revert: async () => { for (const back of undos.reverse()) await back(); },
+				});
+				flash(c ? "→ " + c.path : (note ? "Note added" : "Tagged"));
+				// A moved card is no longer in this collection, so the deck moves
+				// on; anything else leaves you where you were reading.
+				if (c) { ids.splice(at, 1); cache.delete(item.id); render(); }
+			})()).catch((e) => { oops(e); flash("Failed — see the error console"); });
+		},
+	});
+
+	function openPanel(job) {
 		const item = current();
 		if (!item || panel || busy) return;
-		if (!colls.length) return flash("No collections to file into");
+		const work = isFeedMode() ? null : (job || manageJob(0, true));
+		// Only a job that files somewhere needs somewhere to file to.
+		if ((!work || work.pick) && !colls.length) {
+			return flash("No collections to file into");
+		}
+		if (work) return filer(item, null, false, work);
 		const copy = libraryCopy(item);
 		// Filing a paper you already have leaves you with two records, and only
 		// you know whether the old one is worth anything. A hidden toggle would
 		// never be found, so it is a question you answer before the picker opens.
 		if (copy) return askOld(item, copy);
-		filer(item, null, false);
+		filer(item, null, false, fileJob);
 	}
 
 	// "You already have this. What happens to the copy you have?"
@@ -2155,7 +2376,7 @@ function build(w) {
 			const c = choices[sel];
 			panel.remove();
 			panel = null;
-			filer(item, copy, c.drop);
+			filer(item, copy, c.drop, fileJob);
 		};
 		const back = () => {
 			panel.remove();
@@ -2185,7 +2406,11 @@ function build(w) {
 	// Built once per right-arrow and thrown away on Escape or save. Three rows,
 	// revealed one Tab at a time: collection, then tags, then a note. Enter
 	// files the item from wherever you are.
-	function filer(item, copy, dropOld) {
+	// job: what the panel is for. `label` names the first row, `pick` says
+	// whether a collection is part of the job at all, `start` is the row it
+	// opens on, and `run` is what Enter finally does. Feed and collection decks
+	// hand it different jobs and share every row.
+	function filer(item, copy, dropOld, job) {
 		panel = el(doc, "div", "file");
 		doc.body.insertBefore(panel, bar);
 
@@ -2222,7 +2447,8 @@ function build(w) {
 
 		// -- collection row
 		const cRow = el(doc, "div", "row");
-		cRow.append(el(doc, "label", null, "File to"));
+		cRow.append(el(doc, "label", null, job.label));
+		if (!job.pick) cRow.style.display = "none";
 		const cIn = doc.createElement("input");
 		cIn.type = "text";
 		cIn.placeholder = "Fuzzy search collections…";
@@ -2383,7 +2609,7 @@ function build(w) {
 		// Escape means "back one row", and only closes from the first one — same
 		// as the key does. It puts the row away, rather than only leaving it.
 		const back = () => {
-			if (stage === 0) return closePanel();
+			if (stage === 0 || (!job.pick && stage === job.start)) return closePanel();
 			reach = stage - 1;
 			setStage(stage - 1);
 		};
@@ -2445,20 +2671,14 @@ function build(w) {
 		};
 
 		function commit() {
-			const c = chosen();
-			if (!c) return flash("Pick a collection first");
+			const c = job.pick ? chosen() : null;
+			if (job.pick && !c) return flash("Pick a collection first");
 			const rest = splitTags(tIn.value);
 			const finalTags = tags.concat(rest.done, rest.partial ? [rest.partial] : [])
 				.filter((t, i, a) => t && a.indexOf(t) === i);
-			const feedItem = item;
+			const note = nIn.value.trim();
 			closePanel();
-			stat.kept++;
-			statTick();
-			step("right");
-			guard(keep(feedItem, c.id, finalTags, nIn.value.trim(), dropOld)
-				.then((dropped) =>
-					flash("→ " + c.path + (dropped ? " (old one trashed)" : ""))))
-				.catch((e) => stepBack(e, "Save"));
+			job.run(item, c, finalTags, note, dropOld);
 		}
 
 		// Keys inside the panel never reach the card handler: stopPropagation on
@@ -2527,7 +2747,7 @@ function build(w) {
 		filter();
 		paintChips();
 		paintTagDrop();
-		setStage(0);
+		setStage(job.start);
 	}
 
 	// --- card-level keys ---------------------------------------------------
@@ -2553,6 +2773,20 @@ function build(w) {
 			e.preventDefault();
 			ending = false;
 			return render();
+		}
+		// A collection deck acts on different keys: the arrows only move through
+		// it, and everything that changes an item says so by name.
+		if (!isFeedMode()) {
+			switch (e.key) {
+				case "ArrowLeft": e.preventDefault(); return prev();
+				case "ArrowRight": e.preventDefault(); return next();
+				case "m": e.preventDefault(); return openPanel(manageJob(0, true));
+				case "t": e.preventDefault(); return openPanel(manageJob(1, false));
+				case "n": e.preventDefault(); return openPanel(manageJob(2, false));
+				case "x": e.preventDefault(); return doTrash();
+				case "s": case "f": e.preventDefault(); return;
+				default: break;
+			}
 		}
 		switch (e.key) {
 			case "ArrowLeft": e.preventDefault(); doDiscard(); break;
@@ -2608,6 +2842,12 @@ function isFeedRow(ctx) {
 	return !!(row && row.isFeed && row.isFeed());
 }
 
+// A collection, rather than a feed, a saved search or a library root.
+function isCollectionRow(ctx) {
+	const row = ((ctx && ctx.collectionTreeRows) || [])[0];
+	return !!(row && row.isCollection && row.isCollection());
+}
+
 function startup({ id, rootURI: uri }) {
 	rootURI = uri;
 	closeOrphanWindows(); // left by a previous install of this plugin
@@ -2634,6 +2874,13 @@ function startup({ id, rootURI: uri }) {
 			// The row you right-clicked arrives in the menu's context.
 			onCommand: (ev, ctx) => safe(() => {
 				open(isFeedRow(ctx) ? ctx.collectionTreeRows[0].ref.libraryID : null);
+			}),
+		}, {
+			menuType: "menuitem",
+			l10nID: "feed-riffle-collection-menu",
+			onShowing: (ev, ctx) => safe(() => ctx.setVisible(isCollectionRow(ctx))),
+			onCommand: (ev, ctx) => safe(() => {
+				if (isCollectionRow(ctx)) openCollection(ctx.collectionTreeRows[0].ref.id);
 			}),
 		}],
 	});
@@ -2667,5 +2914,6 @@ if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
-		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine };
+		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine,
+		noteHTML };
 }
