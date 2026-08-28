@@ -1,7 +1,7 @@
 {
 	"manifest_version": 2,
 	"name": "Feed Riffle",
-	"version": "0.7.1",
+	"version": "0.7.2",
 	"description": "Deals unread RSS feed items out one card at a time: left arrow discards, right arrow files into a fuzzy-searched collection, with optional tags and a note. For clearing a feed backlog at speed.",
 	"author": "Pavel Ievlev",
 	"icons": {

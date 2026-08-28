@@ -276,6 +276,16 @@ function foldLibraryRows(rows) {
 	return keys;
 }
 
+// What became of the deck: "17 of 24 cleared, 3 skipped for later, 4 still
+// unread." Clauses with nothing to report are left out. Exported for test.js.
+function deckLine(cleared, total, skipped, left) {
+	if (!total) return "Nothing unread.";
+	const parts = [cleared + " of " + total + " cleared"];
+	if (skipped) parts.push(skipped + " skipped for later");
+	if (left) parts.push(left + " still unread");
+	return parts.join(", ") + ".";
+}
+
 // A span at a glance: "38 s", "6 min", "1 h 04 min". Exported for test.js.
 function fmtSpan(ms) {
 	const secs = Math.max(0, Math.round(ms / 1000));
@@ -1764,10 +1774,9 @@ function build(w) {
 	// What the sitting came to. Quiet by design — it is the last thing between
 	// you and the door, not a scoreboard — and it can be turned off from
 	// itself, with the way back in the same place and nowhere else.
-	function summaryBox() {
+	function summaryBox(stopped) {
 		const line = summaryLine(stat.kept, stat.dropped, stat.skipped, stat.spent);
 		if (!line) return null;
-		const box = el(doc, "div", "sum");
 		const quiet = (label, on) => {
 			const b = el(doc, "button", "quiet", label);
 			b.addEventListener("mousedown", (e) => {
@@ -1777,9 +1786,78 @@ function build(w) {
 			});
 			return b;
 		};
-		if (summaryOn()) box.append(el(doc, "div", "figures", line), quiet("hide this", false));
-		else box.append(quiet("summary", true));
+		const box = el(doc, "div", "sum");
+		if (summaryOn()) {
+			box.append(el(doc, "div", "figures", line));
+			// Switched off where it interrupts you. On a screen you reached by
+			// finishing the deck there is nothing to switch off: it was going to
+			// be here anyway.
+			if (stopped) box.append(quiet("Don't show this summary again", false));
+			return box;
+		}
+		// Off, so Esc now closes without stopping here — which leaves the finish
+		// screen as the one place to change your mind.
+		if (stopped) return null;
+		box.append(quiet("Show the summary again", true));
 		return box;
+	}
+
+	// Where riffling ends. `stopped` only says how you got here: by pressing Esc
+	// on a card, rather than by running the deck out.
+	function endScreen(stopped) {
+		cardBox.className = "card";
+		const done = el(doc, "div", "done");
+		const left = Math.max(0, ids.length - cursor);
+		done.append(
+			el(doc, "div", "big", total ? "✓" : "—"),
+			el(doc, "div", null, deckLine(Math.max(0, cursor - skipped), total, skipped, left)),
+		);
+
+		const sum = summaryBox(stopped);
+		if (sum) done.append(sum);
+
+		// Reaching the end of one feed is the moment you are most likely to want
+		// another, so the ones still waiting are offered here rather than left
+		// for you to go and find.
+		nextFeeds = feedRows().filter((r) => r.id !== null && r.n > 0 && r.id !== scopeLib);
+		nextSel = 0;
+		nextDrop = null;
+		if (nextFeeds.length) {
+			const box = el(doc, "div", "next");
+			box.append(el(doc, "div", "nextlabel", "Still waiting"));
+			const drop = el(doc, "div", "drop");
+			nextFeeds.forEach((r, i) => {
+				const row = el(doc, "div", i === nextSel ? "on" : null);
+				row.append(el(doc, "span", null, r.name), el(doc, "b", null, String(r.n)));
+				row.addEventListener("mousedown", (e) => {
+					e.preventDefault();
+					nextSel = i;
+					goNext();
+				});
+				drop.append(row);
+			});
+			box.append(drop);
+			done.append(box);
+			nextDrop = drop;
+		}
+
+		cardBox.append(done);
+		const pickNext = () => {
+			nextSel = (nextSel + 1) % nextFeeds.length;
+			paintNext();
+		};
+		const resume = () => { ending = false; render(); };
+		hint([]
+			.concat(nextFeeds.length
+				? [["⏎", "next feed", () => goNext()], ["↑↓", "pick", pickNext]]
+				: [["⏎", "close", () => w.close()]])
+			.concat(stopped && left ? [["←→", "keep riffling", resume]] : [])
+			.concat([["u", "undo", () => { ending = false; doUndo(); }]])
+			.concat(nextFeeds.length || stopped
+				? [] : [["r", "reload", () => reload().catch(oops)]])
+			.concat([["Esc", "close", () => w.close()]]));
+		feedName.textContent = "";
+		count.textContent = "";
 	}
 
 	function draw() {
@@ -1788,85 +1866,11 @@ function build(w) {
 		cardBox.replaceChildren();
 		cardBox.scrollTop = 0;
 
-		// Stopping half-way is the ordinary way to finish, so the summary belongs
-		// here rather than only at the end of a deck. Esc again closes.
-		if (ending) {
-			cardBox.className = "card";
-			const done = el(doc, "div", "done");
-			const left = Math.max(0, ids.length - cursor);
-			done.append(
-				el(doc, "div", "big", "✓"),
-				el(doc, "div", null, left
-					? `${left} still unread — they keep.`
-					: "Nothing left in this feed."),
-			);
-			const sum = summaryBox();
-			if (sum) done.append(sum);
-			cardBox.append(done);
-			nextFeeds = [];
-			nextDrop = null;
-			const resume = () => { ending = false; render(); };
-			hint([["Esc", "close", () => w.close()], ["⏎", "close", () => w.close()],
-				["←→", "keep riffling", resume],
-				["u", "undo", () => { ending = false; doUndo(); }]]);
-			feedName.textContent = "";
-			count.textContent = "";
-			return;
-		}
+		// One screen either way: the deck ran out, or you stopped. The figures,
+		// the feeds still waiting and the way out are the same — what differs is
+		// only that a summary can be switched off where it interrupted you.
+		if (ending || cursor >= ids.length) return endScreen(ending);
 
-		if (cursor >= ids.length) {
-			cardBox.className = "card";
-			const done = el(doc, "div", "done");
-			done.append(
-				el(doc, "div", "big", total ? "✓" : "—"),
-				el(doc, "div", null, total
-					? `${total - skipped} of ${total} cleared`
-						+ (skipped ? `, ${skipped} skipped for later.` : ".")
-					: "Nothing unread."),
-			);
-
-			// Reaching the end of one feed is the moment you are most likely to
-			// want another, so the ones still waiting are offered here rather
-			// than left for you to go and find.
-			nextFeeds = feedRows().filter((r) => r.id !== null && r.n > 0 && r.id !== scopeLib);
-			nextSel = 0;
-			nextDrop = null;
-			if (nextFeeds.length) {
-				const box = el(doc, "div", "next");
-				box.append(el(doc, "div", "nextlabel", "Still waiting"));
-				const drop = el(doc, "div", "drop");
-				nextFeeds.forEach((r, i) => {
-					const row = el(doc, "div", i === nextSel ? "on" : null);
-					row.append(el(doc, "span", null, r.name), el(doc, "b", null, String(r.n)));
-					row.addEventListener("mousedown", (e) => {
-						e.preventDefault();
-						nextSel = i;
-						goNext();
-					});
-					drop.append(row);
-				});
-				box.append(drop);
-				done.append(box);
-				nextDrop = drop;
-			}
-
-			const sum = summaryBox();
-			if (sum) done.append(sum);
-
-			cardBox.append(done);
-			const pickNext = () => {
-				nextSel = (nextSel + 1) % nextFeeds.length;
-				paintNext();
-			};
-			hint(nextFeeds.length
-				? [["⏎", "next feed", () => goNext()], ["↑↓", "pick", pickNext],
-					["u", "undo", () => doUndo()], ["Esc", "close", () => w.close()]]
-				: [["u", "undo", () => doUndo()], ["r", "reload", () => reload().catch(oops)],
-					["Esc", "close", () => w.close()]]);
-			feedName.textContent = "";
-			count.textContent = "";
-			return;
-		}
 		nextFeeds = [];
 		nextDrop = null;
 
@@ -2023,7 +2027,7 @@ function build(w) {
 	// Esc stops riffling: the summary first, and Esc again to be gone. With the
 	// summary turned off, or nothing done to summarise, it just closes.
 	const stop = () => {
-		if (ending || !summaryOn()
+		if (ending || cursor >= ids.length || !summaryOn()
 			|| !(stat.kept + stat.dropped + stat.skipped)) return w.close();
 		ending = true;
 		render();
@@ -2533,8 +2537,8 @@ function build(w) {
 			case "r": if (cursor >= ids.length) { e.preventDefault(); reload().catch(oops); } break;
 			case "Escape": e.preventDefault(); (ending ? w.close() : stop()); break;
 			case "Enter":
-				if (ending) { e.preventDefault(); w.close(); }
-				else if (nextFeeds.length) { e.preventDefault(); goNext(); }
+				if (nextFeeds.length) { e.preventDefault(); goNext(); }
+				else if (ending || cursor >= ids.length) { e.preventDefault(); w.close(); }
 				break;
 			case "ArrowDown": case "ArrowUp": {
 				e.preventDefault();
@@ -2622,5 +2626,5 @@ if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
-		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine };
+		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine };
 }

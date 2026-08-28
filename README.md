@@ -59,18 +59,21 @@ is destroyed and <kbd>u</kbd> puts it straight back.
 The collections the old copy is in are hoisted to the top of the picker, marked
 *already in* — usually where the new version belongs too.
 
-**Stopping sums up the sitting.** <kbd>Esc</kbd> shows *11 kept · 4 discarded ·
-3 skipped · 14 min · 47 s a card* and how much of the deck keeps for later;
-<kbd>Esc</kbd> again closes, an arrow puts you back on the card you were on.
-Only the time a card was actually in front of you is counted, since a gap longer
-than five minutes was lunch rather than reading, and the tally follows you from
-feed to feed, resetting when the window opens. The same figures end a deck you
-finish. *hide this*, underneath, turns the summary off for good — <kbd>Esc</kbd>
-then simply closes — and a faint *summary* is left in its place, there and
-nowhere else, to turn it back on.
+**Riffling ends on one screen**, whether the deck ran out or you stopped:
+*17 of 24 cleared, 3 skipped for later, 4 still unread*, the sitting in figures —
+*11 kept · 4 discarded · 3 skipped · 14 min · 47 s a card* — and the feeds that
+still have unread items. Only the time a card was actually in front of you is
+counted, since a gap longer than five minutes was lunch rather than reading, and
+the tally follows you from feed to feed, resetting when the window opens.
 
-When a feed runs out, the finish screen also lists the feeds that still have unread
-items, with their counts — <kbd>Enter</kbd> carries straight on into the top one.
+<kbd>Esc</kbd> on a card stops there rather than closing outright;
+<kbd>Esc</kbd> again closes and an arrow puts you back on the card you were on.
+*Don't show this summary again*, underneath, turns that interruption off for
+good — <kbd>Esc</kbd> then simply closes — and the finish screen you reach by
+running a deck out carries *Show the summary again*, there and nowhere else, to
+change your mind.
+
+The feeds still waiting are listed with their counts — <kbd>Enter</kbd> carries straight on into the top one.
 Reaching the end is when you are most likely to want another, so it is offered
 rather than left for you to go and find.
 

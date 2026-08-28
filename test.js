@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine } = require("./bootstrap.js");
+	summaryLine, deckLine } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -301,3 +301,10 @@ assert.strictEqual(summaryLine(2, 0, 0, 30000), "2 kept · 30 s",
 	"nothing discarded, nothing skipped: neither is printed, and two cards set no pace");
 assert.strictEqual(summaryLine(0, 0, 0, 0), "",
 	"a window opened and closed again has nothing to say");
+assert.strictEqual(deckLine(21, 24, 3, 0), "21 of 24 cleared, 3 skipped for later.",
+	"the deck ran out: nothing is left unread");
+assert.strictEqual(deckLine(17, 24, 3, 4),
+	"17 of 24 cleared, 3 skipped for later, 4 still unread.", "stopped part-way");
+assert.strictEqual(deckLine(24, 24, 0, 0), "24 of 24 cleared.",
+	"clauses with nothing to report are left out");
+assert.strictEqual(deckLine(0, 0, 0, 0), "Nothing unread.");
