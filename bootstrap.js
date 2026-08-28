@@ -2601,6 +2601,13 @@ function build(w) {
 
 // --- plugin lifecycle ------------------------------------------------------
 
+// Is the row this menu was opened on a feed? Anything else — a collection, a
+// library, the Feeds header — is not something to riffle.
+function isFeedRow(ctx) {
+	const row = ((ctx && ctx.collectionTreeRows) || [])[0];
+	return !!(row && row.isFeed && row.isFeed());
+}
+
 function startup({ id, rootURI: uri }) {
 	rootURI = uri;
 	closeOrphanWindows(); // left by a previous install of this plugin
@@ -2619,10 +2626,14 @@ function startup({ id, rootURI: uri }) {
 		menus: [{
 			menuType: "menuitem",
 			l10nID: "feed-riffle-feed-menu",
+			// "Riffle this feed" has nothing to say about a collection, so it is
+			// only there on a feed. This target is registered without an event,
+			// which is what makes Zotero run the hook on every popupshowing
+			// rather than once when the item is built.
+			onShowing: (ev, ctx) => safe(() => ctx.setVisible(isFeedRow(ctx))),
 			// The row you right-clicked arrives in the menu's context.
 			onCommand: (ev, ctx) => safe(() => {
-				const row = ((ctx && ctx.collectionTreeRows) || [])[0];
-				open(row && row.isFeed && row.isFeed() ? row.ref.libraryID : null);
+				open(isFeedRow(ctx) ? ctx.collectionTreeRows[0].ref.libraryID : null);
 			}),
 		}],
 	});
