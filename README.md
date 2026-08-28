@@ -84,8 +84,9 @@ the box then reads it back to you — and opens a tag box, which fuzzy-completes
 your existing tags. <kbd>Enter</kbd> commits a tag, taking the highlighted
 suggestion when there is one; <kbd>Shift</kbd>+<kbd>Enter</kbd> commits the words
 exactly as typed, which is how you make a tag that merely looks like one you
-already have. <kbd>Enter</kbd> on an empty box files the item. <kbd>Tab</kbd>
-again opens the note box, where <kbd>Enter</kbd> files and
+already have. <kbd>Enter</kbd> on an empty box files the item. <kbd>Tab</kbd> finishes a tag
+the same way <kbd>Enter</kbd> does, and on an empty box moves on to the note box,
+where <kbd>Enter</kbd> files and
 <kbd>Shift</kbd>+<kbd>Enter</kbd> makes a newline. <kbd>Shift</kbd>+<kbd>Tab</kbd>
 moves back a row and <kbd>Esc</kbd> steps back one at a time; either way the row
 you return to opens its own fuzzy list again.

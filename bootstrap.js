@@ -2125,8 +2125,11 @@ function build(w) {
 					.concat(typed ? [["⇧⏎", "as new tag", () => takeTag(true)]] : [])
 					.concat(!typed && tags.length
 						? [["⌫", armed ? "remove it" : "last tag", rubOut]] : [])
-					.concat([["⇥", "add note", () => setStage(2)],
-						["⇧⇥", "back", () => setStage(0)], ["Esc", "cancel", back]]));
+					// ⇥ finishes the tag just as ⏎ does; it only earns a place in
+					// the bar once the box is empty and it means something else.
+					.concat(typed ? [] : [["⇥", "add note", () => setStage(2)]])
+					.concat([["⇧⇥", "back", () => setStage(0)],
+						["Esc", "cancel", back]]));
 			} else {
 				// Nothing to click about a modifier: ⇧⏎ describes the key alone.
 				hint([["⏎", "file", () => commit()], ["⇧⏎", "newline"],
@@ -2186,8 +2189,13 @@ function build(w) {
 			}
 			if (e.key === "Tab") {
 				e.preventDefault(); e.stopPropagation();
-				if (stage === 0 && !e.shiftKey) takeCollection();
-				return setStage(stage + (e.shiftKey ? -1 : 1));
+				if (e.shiftKey) return setStage(stage - 1);
+				// Tab takes the row you are on with you: the highlighted
+				// collection, or the tag you are part-way through typing. Only an
+				// empty tag box means you are done here and want the note.
+				if (stage === 0) takeCollection();
+				if (stage === 1 && tIn.value.trim()) return takeTag();
+				return setStage(stage + 1);
 			}
 			// Only with the box empty: with anything in it, Backspace is editing.
 			if (e.key === "Backspace" && stage === 1 && !tIn.value && tags.length) {
