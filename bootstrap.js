@@ -1210,7 +1210,17 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .drop div.on { background:Highlight; color:HighlightText; }
 .drop .none { color:GrayText; font-style:italic; cursor:default; }
 
-.chips { display:flex; flex-wrap:wrap; gap:.25rem; }
+/* One control that happens to contain chips: they flow with the box you type
+ * in and wrap onto a new line together, and the box keeps a usable width by
+ * dropping to a line of its own rather than being squeezed to nothing. */
+.row .field { flex:1; min-width:0; display:flex; flex-wrap:wrap;
+	align-items:center; gap:.25rem; padding:.18rem .25rem; border-radius:5px;
+	background:Canvas; border:1px solid color-mix(in srgb, GrayText 45%, Canvas); }
+.row .field:focus-within { border-color:Highlight;
+	box-shadow:0 0 0 2px color-mix(in srgb, Highlight 30%, transparent); }
+.row .field input { flex:1 1 9rem; min-width:9rem; border:none; background:none;
+	padding:.07rem .25rem; }
+.row .field input:focus { outline:none; border:none; box-shadow:none; }
 .chip { font-size:.75rem; padding:.05em .25em .05em .5em; border-radius:1em;
 	display:flex; align-items:center; gap:.15em;
 	background:color-mix(in srgb, Highlight 22%, Canvas);
@@ -2113,12 +2123,17 @@ function build(w) {
 		const tRow = el(doc, "div", "row");
 		tRow.style.display = "none";
 		tRow.append(el(doc, "label", null, "Tags"));
-		const chips = el(doc, "div", "chips");
+		// The chips and the box you type in are one field, so they wrap
+		// together: as its own flex item the box kept whatever sliver was left
+		// at the end of the last chip, which on a well-tagged paper was a
+		// letter wide.
+		const field = el(doc, "div", "field");
 		const tIn = doc.createElement("input");
 		tIn.type = "text";
 		tIn.placeholder = "tag, another tag…";
 		const tDrop = el(doc, "div", "drop");
-		tRow.append(chips, tIn, tDrop);
+		field.append(tIn);
+		tRow.append(field, tDrop);
 		panel.append(tRow);
 
 		let tShown = [];
@@ -2129,7 +2144,7 @@ function build(w) {
 		let armed = false;
 
 		const paintChips = () => {
-			chips.replaceChildren();
+			for (const old of [...field.querySelectorAll(".chip")]) old.remove();
 			tags.forEach((name, i) => {
 				const last = i === tags.length - 1;
 				const chip = el(doc, "span", armed && last ? "chip on" : "chip", name);
@@ -2143,7 +2158,9 @@ function build(w) {
 					tIn.focus();
 				});
 				chip.append(x);
-				chips.append(chip);
+				// Before the box, so the caret stays at the end of the line the
+				// way it does in every other tag field.
+				field.insertBefore(chip, tIn);
 			});
 		};
 
