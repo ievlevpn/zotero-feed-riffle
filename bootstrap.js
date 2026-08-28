@@ -1924,7 +1924,7 @@ function build(w) {
 			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
 				() => setScale(fontScale - SIZE_STEP)]],
 			["Esc", "close", stop]]
-		: [["←→", "move through", [prev, next]],
+		: [["←/→", "move through", [prev, next]],
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
 			["n", "note", () => openPanel(manageJob("note", current()))],
 			["m", "move to", () => openPanel(manageJob("move", current()))],
@@ -2589,29 +2589,40 @@ function build(w) {
 
 		let tShown = [];
 		let tSel = 0;
-		// Backspace on an empty box takes aim at the chip nearest the caret
-		// before it removes it, so a key held down a moment too long costs you a
-		// look rather than a tag.
-		let armed = false;
+		// Which chip is under the cursor: -1 is the box you type in, and any
+		// other value is a tag picked out for removal. Backspace on an empty box
+		// takes aim at the one nearest the caret before it removes it — a key
+		// held a moment too long costs you a look rather than a tag — and the
+		// arrows walk from there to any other tag on the item.
+		let armed = -1;
 
 		const paintChips = () => {
 			for (const old of [...field.querySelectorAll(".chip")]) old.remove();
 			tags.forEach((name, i) => {
-				const last = i === tags.length - 1;
-				const chip = el(doc, "span", armed && last ? "chip on" : "chip", name);
-				// Not while it is armed: that one is wearing the highlight that
-				// says Backspace will take it off.
-				if (!(armed && last)) {
+				const chip = el(doc, "span", armed === i ? "chip on" : "chip", name);
+				// Not on the armed one: that is wearing the highlight that says
+				// Backspace will take it off.
+				if (armed !== i) {
 					const c = tagColor(item.libraryID, name);
 					paintTag(chip, c && c.color);
 				}
+				// Clicking the tag itself picks it out, the way the arrows do.
+				chip.addEventListener("mousedown", (e) => {
+					e.preventDefault();
+					armed = armed === i ? -1 : i;
+					paintChips();
+					panelHints();
+					tIn.focus();
+				});
 				const x = el(doc, "button", null, "×");
 				x.title = "Remove";
 				x.addEventListener("mousedown", (e) => {
 					e.preventDefault();
+					e.stopPropagation();
 					tags.splice(i, 1);
-					armed = false;
+					armed = -1;
 					paintChips();
+					panelHints();
 					tIn.focus();
 				});
 				chip.append(x);
@@ -2646,8 +2657,24 @@ function build(w) {
 		// Move whatever is typed (or highlighted in the dropdown) into a chip.
 		const rubOut = () => {
 			if (!tags.length) return;
-			if (armed) { tags.pop(); armed = false; }
-			else armed = true;
+			if (armed < 0) armed = tags.length - 1;
+			else {
+				tags.splice(armed, 1);
+				// Stay where the removed one was, so a second press carries on
+				// through the row rather than starting again from the end.
+				armed = Math.min(armed, tags.length - 1);
+			}
+			paintChips();
+			panelHints();
+		};
+
+		// Left walks back along the tags, right walks towards the box you type
+		// in and stops there — where a bare arrow means the caret again.
+		const walkTags = (d) => {
+			if (!tags.length) return;
+			if (armed < 0) { if (d < 0) armed = tags.length - 1; }
+			else if (d < 0) armed = Math.max(0, armed - 1);
+			else armed = armed + 1 > tags.length - 1 ? -1 : armed + 1;
 			paintChips();
 			panelHints();
 		};
@@ -2662,7 +2689,7 @@ function build(w) {
 			if (pick && !tags.includes(pick)) tags.push(pick);
 			tIn.value = "";
 			tSel = 0;
-			armed = false;
+			armed = -1;
 			paintChips();
 			paintTagDrop();
 		};
@@ -2702,7 +2729,8 @@ function build(w) {
 					() => (typed ? takeTag() : commit())]]
 					.concat(typed ? [["⇧⏎", "as new tag", () => takeTag(true)]] : [])
 					.concat(!typed && tags.length
-						? [["⌫", armed ? "remove it" : "last tag", rubOut]] : [])
+						? [["⌫", armed >= 0 ? "remove it" : "last tag", rubOut],
+							["←/→", "pick tag", [() => walkTags(-1), () => walkTags(1)]]] : [])
 					// ⇥ finishes the tag just as ⏎ does; it only earns a place in
 					// the bar once the box is empty and it means something else.
 					.concat(typed || job.only ? [] : [["⇥", "add note", () => setStage(2)]])
@@ -2719,7 +2747,7 @@ function build(w) {
 		const setStage = (s) => {
 			stage = Math.max(0, Math.min(2, s));
 			reach = Math.max(reach, stage);
-			armed = false;
+			armed = -1;
 			// A job with one purpose shows one row: a note box does not want a
 			// tag box sitting on top of it.
 			tRow.style.display = (job.only ? stage === 1 : reach >= 1) ? "" : "none";
@@ -2780,10 +2808,16 @@ function build(w) {
 				if (stage === 1 && tIn.value.trim()) return takeTag();
 				return setStage(stage + 1);
 			}
-			// Only with the box empty: with anything in it, Backspace is editing.
-			if (e.key === "Backspace" && stage === 1 && !tIn.value && tags.length) {
-				e.preventDefault(); e.stopPropagation();
-				return rubOut();
+			// Only with the box empty: with anything in it, these are editing.
+			if (stage === 1 && !tIn.value && tags.length) {
+				if (e.key === "Backspace" || (e.key === "Delete" && armed >= 0)) {
+					e.preventDefault(); e.stopPropagation();
+					return rubOut();
+				}
+				if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+					e.preventDefault(); e.stopPropagation();
+					return walkTags(e.key === "ArrowLeft" ? -1 : 1);
+				}
 			}
 			if (e.key === "Enter") {
 				if (stage === 2 && e.shiftKey) return; // newline in the note
@@ -2810,7 +2844,7 @@ function build(w) {
 				return; // note box: let the caret move
 			}
 			// Any other key means you have moved on from that chip.
-			if (armed) { armed = false; paintChips(); panelHints(); }
+			if (armed >= 0) { armed = -1; paintChips(); panelHints(); }
 			e.stopPropagation(); // ordinary typing stays in the box
 		};
 
@@ -2820,7 +2854,7 @@ function build(w) {
 		// is in the box, and that changes with every keystroke.
 		tIn.addEventListener("input", () => {
 			tSel = 0;
-			armed = false;
+			armed = -1;
 			paintChips();
 			paintTagDrop();
 			panelHints();

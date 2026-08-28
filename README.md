@@ -113,8 +113,10 @@ nothing at all; you can walk a collection end to end and close the window
 without having touched it.
 
 What changes an item says so by name. <kbd>t</kbd> opens the tag box holding the
-tags the item already has — take one off with <kbd>⌫</kbd> or its ×, add
-another, <kbd>Enter</kbd> saves, and the card redraws with what it now carries.
+tags the item already has. With the box empty, <kbd>←</kbd> and <kbd>→</kbd>
+walk along the chips and <kbd>⌫</kbd> takes the picked one off — right off the
+end puts you back in the box, and clicking a tag picks it just the same.
+<kbd>Enter</kbd> saves, and the card redraws with what it now carries.
 <kbd>n</kbd> adds a note, <kbd>m</kbd> moves the item to another collection
 (a move, not a copy: it leaves the one you are riffling), and <kbd>x</kbd> puts
 it in Zotero's trash. Each panel shows its own row and nothing else.
