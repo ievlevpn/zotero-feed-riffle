@@ -1128,6 +1128,8 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .chip button { border:none; background:none; cursor:pointer; color:inherit;
 	font-size:.9rem; line-height:1; padding:0 .2em; opacity:.7; }
 .chip button:hover { opacity:1; }
+/* Armed by Backspace: the next one takes it off. */
+.chip.on { background:Highlight; border-color:Highlight; color:HighlightText; }
 
 .flash { position:fixed; left:50%; bottom:4.6rem; transform:translateX(-50%);
 	z-index:20; font-size:.8rem; padding:.35rem .9rem; border-radius:1em;
@@ -2021,16 +2023,22 @@ function build(w) {
 
 		let tShown = [];
 		let tSel = 0;
+		// Backspace on an empty box takes aim at the chip nearest the caret
+		// before it removes it, so a key held down a moment too long costs you a
+		// look rather than a tag.
+		let armed = false;
 
 		const paintChips = () => {
 			chips.replaceChildren();
 			tags.forEach((name, i) => {
-				const chip = el(doc, "span", "chip", name);
+				const last = i === tags.length - 1;
+				const chip = el(doc, "span", armed && last ? "chip on" : "chip", name);
 				const x = el(doc, "button", null, "×");
 				x.title = "Remove";
 				x.addEventListener("mousedown", (e) => {
 					e.preventDefault();
 					tags.splice(i, 1);
+					armed = false;
 					paintChips();
 					tIn.focus();
 				});
@@ -2060,6 +2068,14 @@ function build(w) {
 		};
 
 		// Move whatever is typed (or highlighted in the dropdown) into a chip.
+		const rubOut = () => {
+			if (!tags.length) return;
+			if (armed) { tags.pop(); armed = false; }
+			else armed = true;
+			paintChips();
+			panelHints();
+		};
+
 		// Enter takes the highlighted suggestion; Shift+Enter (literal) takes the
 		// words as they stand, which is how you make a tag that merely looks
 		// like one you already have.
@@ -2070,6 +2086,7 @@ function build(w) {
 			if (pick && !tags.includes(pick)) tags.push(pick);
 			tIn.value = "";
 			tSel = 0;
+			armed = false;
 			paintChips();
 			paintTagDrop();
 		};
@@ -2106,6 +2123,8 @@ function build(w) {
 				hint([["⏎", typed ? "add tag" : "file",
 					() => (typed ? takeTag() : commit())]]
 					.concat(typed ? [["⇧⏎", "as new tag", () => takeTag(true)]] : [])
+					.concat(!typed && tags.length
+						? [["⌫", armed ? "remove it" : "last tag", rubOut]] : [])
 					.concat([["⇥", "add note", () => setStage(2)],
 						["⇧⇥", "back", () => setStage(0)], ["Esc", "cancel", back]]));
 			} else {
@@ -2118,6 +2137,7 @@ function build(w) {
 		const setStage = (s) => {
 			stage = Math.max(0, Math.min(2, s));
 			reach = Math.max(reach, stage);
+			armed = false;
 			tRow.style.display = reach >= 1 ? "" : "none";
 			nRow.style.display = reach >= 2 ? "" : "none";
 			cDrop.style.display = stage === 0 ? "" : "none";
@@ -2169,6 +2189,11 @@ function build(w) {
 				if (stage === 0 && !e.shiftKey) takeCollection();
 				return setStage(stage + (e.shiftKey ? -1 : 1));
 			}
+			// Only with the box empty: with anything in it, Backspace is editing.
+			if (e.key === "Backspace" && stage === 1 && !tIn.value && tags.length) {
+				e.preventDefault(); e.stopPropagation();
+				return rubOut();
+			}
 			if (e.key === "Enter") {
 				if (stage === 2 && e.shiftKey) return; // newline in the note
 				e.preventDefault(); e.stopPropagation();
@@ -2193,6 +2218,8 @@ function build(w) {
 				}
 				return; // note box: let the caret move
 			}
+			// Any other key means you have moved on from that chip.
+			if (armed) { armed = false; paintChips(); panelHints(); }
 			e.stopPropagation(); // ordinary typing stays in the box
 		};
 
@@ -2202,6 +2229,7 @@ function build(w) {
 		// is in the box, and that changes with every keystroke.
 		tIn.addEventListener("input", () => {
 			tSel = 0;
+			armed = false;
 			paintChips();
 			paintTagDrop();
 			panelHints();
