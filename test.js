@@ -308,3 +308,22 @@ assert.strictEqual(deckLine(17, 24, 3, 4),
 assert.strictEqual(deckLine(24, 24, 0, 0), "24 of 24 cleared.",
 	"clauses with nothing to report are left out");
 assert.strictEqual(deckLine(0, 0, 0, 0), "Nothing unread.");
+
+// --- a display environment with no delimiters around it -------------------
+// LaTeX needs none and MathJax renders it, so arXiv abstracts contain it bare.
+// Left as prose it reached deLatex(), which stripped every command and left
+// "align* i _t u +2||^u" in the middle of a sentence.
+{
+	const runs = splitMath("torus $[0,L]$: \\begin{align*} i \\partial_t u = 0. \\end{align*} Our focus");
+	const env = runs.find((r) => r.math && r.display);
+	assert.ok(env, "the environment is a maths run");
+	assert.ok(env.text.startsWith("\\begin{align*}") && env.text.endsWith("\\end{align*}"),
+		"taken whole, delimiters and all, which is what KaTeX wants");
+	assert.strictEqual(runs[runs.length - 1].text, " Our focus",
+		"and the sentence after it is still prose");
+	assert.ok(runs.some((r) => r.math && !r.display && r.text === "[0,L]"),
+		"ordinary inline maths alongside it is untouched");
+}
+assert.deepStrictEqual(
+	splitMath("half an \\begin{align*} equation").map((r) => r.math), [false],
+	"an environment that never ends is left alone rather than swallowing the rest");

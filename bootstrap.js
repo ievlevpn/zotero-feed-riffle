@@ -606,6 +606,20 @@ function looksLikeMath(s) {
 	return !/[a-z]{3,}/.test(s);          // prose has words; "$x + y$" has none
 }
 
+// Display environments a feed may write with no delimiters around them at all.
+// LaTeX needs none — \begin{align*} is already display maths — and MathJax on
+// the arXiv page renders it, so an author has no reason to add any. Left as
+// prose the run reaches deLatex(), which strips every command and turns the
+// equation into "align* i _t u +2||^u".
+const ENVS = /^\\begin\{(align|alignat|equation|eqnarray|gather|multline|split|flalign)(\*?)\}/;
+
+// The length cap is there to catch a delimiter that never closed and swallowed
+// the paragraph. An environment cannot do that — it was taken only because its
+// own \end was found — so it is allowed to be as long as it is.
+function fitsAsMath(tex) {
+	return tex.length <= MATH_CAP || ENVS.test(tex);
+}
+
 function splitMath(text) {
 	const s = text || "";
 	const out = [];
@@ -617,6 +631,19 @@ function splitMath(text) {
 		const c = s[i];
 
 		if (c === "\\") {
+			// A bare environment is its own delimiter: take it whole, through to
+			// the \end that closes it, and hand KaTeX the lot in display mode.
+			const env = ENVS.exec(s.slice(i));
+			if (env) {
+				const tail = "\\end{" + env[1] + env[2] + "}";
+				const end = s.indexOf(tail, i);
+				if (end >= 0) {
+					flush();
+					out.push({ math: true, display: true, text: s.slice(i, end + tail.length) });
+					i = end + tail.length;
+					continue;
+				}
+			}
 			const open = s[i + 1];
 			const close = open === "(" ? "\\)" : open === "[" ? "\\]" : "";
 			if (close) {
@@ -1322,7 +1349,7 @@ function mathFragment(doc, text) {
 		// abstract the importer already mangled. Rendering it as math nests the
 		// rest of the paragraph inside a subscript, where MathML's scriptlevel
 		// shrinks it to unreadable. Falling back to text is the honest failure.
-		if (run.math && run.text.length <= MATH_CAP) mathInto(doc, frag, run.text, run.display);
+		if (run.math && fitsAsMath(run.text)) mathInto(doc, frag, run.text, run.display);
 		else frag.append(deLatex(run.text)); // text-mode accents and escapes
 	}
 	return frag;
@@ -1370,7 +1397,7 @@ function inlineInto(doc, parent, text) {
 		// abstract the importer already mangled. Rendering it as math nests the
 		// rest of the paragraph inside a subscript, where MathML's scriptlevel
 		// shrinks it to unreadable. Falling back to prose is the honest failure.
-		if (run.math && run.text.length <= MATH_CAP) mathInto(doc, parent, run.text, run.display);
+		if (run.math && fitsAsMath(run.text)) mathInto(doc, parent, run.text, run.display);
 		else parent.append(typography(deLatex(run.text)));
 	}
 }

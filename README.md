@@ -143,7 +143,9 @@ its own typography. Links open in your browser, not in the riffle window.
 thing, not an approximation: environments, `\left…\right` that stretches to
 what it contains, `\begin{cases}`, author-defined macros, everything a feed's
 LaTeX can hold. All four delimiter styles are understood — `$…$`, `$$…$$`,
-`\(…\)` and `\[…\]` — in titles as well as descriptions. KaTeX loads on first
+`\(…\)` and `\[…\]` — in titles as well as descriptions, and so is a display
+environment written bare: LaTeX needs no delimiters around `\begin{align*}`, so
+authors write none, and the run is taken whole through to its own `\end`. KaTeX loads on first
 use rather than at startup, so a plugin you never open costs nothing.
 
 `\color` means two different things and feeds contain both. MathJax reads
