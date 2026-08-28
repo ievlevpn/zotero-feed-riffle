@@ -1223,7 +1223,10 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	font-size:.72rem; padding:.1rem .3rem; border-radius:4px;
 	color:color-mix(in srgb, GrayText 55%, Canvas); }
 .quiet:hover { color:GrayText; background:color-mix(in srgb, GrayText 12%, Canvas); }
-.done .drop { position:static; max-height:none; box-shadow:none;
+/* The message around it is grey because it is a message. This is a list you
+ * pick from with the arrows, the same one the feed picker shows, so it reads in
+ * ordinary text rather than looking switched off. */
+.done .drop { position:static; max-height:none; box-shadow:none; color:CanvasText;
 	border:1px solid color-mix(in srgb, GrayText 35%, Canvas); }
 
 .bar { border-top:1px solid color-mix(in srgb, GrayText 35%, Canvas);
