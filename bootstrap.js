@@ -1078,6 +1078,13 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .bar kbd { font:.72rem ui-monospace, monospace; padding:.05em .4em; border-radius:4px;
 	border:1px solid color-mix(in srgb, GrayText 45%, Canvas);
 	background:color-mix(in srgb, GrayText 14%, Canvas); color:CanvasText; }
+/* A hint that names a key you can also click. The key itself lights up, so a
+ * "+ / −" pair still reads as two buttons rather than one. */
+.bar .hit { cursor:pointer; }
+.bar .hit:hover { color:CanvasText; }
+.bar .hit:hover > kbd, .bar kbd.hit:hover {
+	border-color:color-mix(in srgb, Highlight 60%, Canvas);
+	background:color-mix(in srgb, Highlight 22%, Canvas); }
 
 /* The filing panel replaces the hint bar rather than floating over the card:
  * you keep reading the description while you decide where it goes. */
@@ -1545,23 +1552,40 @@ function build(w) {
 
 	const current = () => cache.get(ids[cursor]);
 
-	const hint = (pairs) => {
+	// Third element of a hint: what its key does. With one, the whole hint —
+	// key and words — becomes a button; with an array, each key in a "+/−"
+	// pair gets its own. mousedown, not click, so a panel input keeps focus and
+	// the keyboard still works the moment after you use the mouse.
+	const arm = (node, fn) => {
+		node.classList.add("hit");
+		node.addEventListener("mousedown", (e) => { e.preventDefault(); fn(); });
+	};
+	const hint = (triples) => {
 		bar.replaceChildren();
-		for (const [k, what] of pairs) {
+		for (const [k, what, act] of triples) {
 			const span = el(doc, "span");
-			for (const key of k.split("/")) {
-				if (span.childNodes.length) span.append(" / ");
-				span.append(el(doc, "kbd", null, key));
-			}
+			const many = Array.isArray(act);
+			k.split("/").forEach((key, i) => {
+				if (i) span.append(" / ");
+				const kb = el(doc, "kbd", null, key);
+				if (many && act[i]) arm(kb, act[i]);
+				span.append(kb);
+			});
 			span.append(" " + what);
+			if (act && !many) arm(span, act);
 			bar.append(span);
 		}
 	};
 
+	// The numbers file into recent collections without the panel; clicking that
+	// hint opens the panel, which is where those same collections are listed.
 	const cardHints = () => hint([
-		["←", "discard"], ["→", "keep"], ["s", "skip"], ["u", "undo"],
-		["1–9", "recent"], ["f", "feed"], ["o", "open"], ["+/−", "size"],
-		["Esc", "close"],
+		["←", "discard", doDiscard], ["→", "keep", openPanel], ["s", "skip", doSkip],
+		["u", "undo", doUndo], ["1–9", "recent", openPanel], ["f", "feed", openFeeds],
+		["o", "open", openURL],
+		["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
+			() => setScale(fontScale - SIZE_STEP)]],
+		["Esc", "close", () => w.close()],
 	]);
 
 	// --- the card ---------------------------------------------------------
@@ -1620,9 +1644,15 @@ function build(w) {
 			}
 
 			cardBox.append(done);
+			const pickNext = () => {
+				nextSel = (nextSel + 1) % nextFeeds.length;
+				paintNext();
+			};
 			hint(nextFeeds.length
-				? [["⏎", "next feed"], ["↑↓", "pick"], ["u", "undo"], ["Esc", "close"]]
-				: [["u", "undo"], ["r", "reload"], ["Esc", "close"]]);
+				? [["⏎", "next feed", () => goNext()], ["↑↓", "pick", pickNext],
+					["u", "undo", () => doUndo()], ["Esc", "close", () => w.close()]]
+				: [["u", "undo", () => doUndo()], ["r", "reload", () => reload().catch(oops)],
+					["Esc", "close", () => w.close()]]);
 			feedName.textContent = "";
 			count.textContent = "";
 			return;
@@ -1853,27 +1883,29 @@ function build(w) {
 			panel = null;
 			filer(item, copy, c.drop);
 		};
+		const back = () => {
+			panel.remove();
+			panel = null;
+			cardHints();
+			w.focus();
+		};
+		const move = (d) => {
+			sel = (sel + d + choices.length) % choices.length;
+			paint();
+		};
 		panel.addEventListener("keydown", (e) => {
 			e.stopPropagation();
-			if (e.key === "Escape") {
-				e.preventDefault();
-				panel.remove();
-				panel = null;
-				cardHints();
-				w.focus();
-				return;
-			}
+			if (e.key === "Escape") { e.preventDefault(); return back(); }
 			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
 				e.preventDefault();
-				sel = (sel + (e.key === "ArrowDown" ? 1 : -1) + choices.length) % choices.length;
-				return paint();
+				return move(e.key === "ArrowDown" ? 1 : -1);
 			}
 			if (e.key === "Enter") { e.preventDefault(); return choose(); }
 		});
 		panel.append(drop);
 		paint();
 		panel.focus();
-		hint([["↑↓", "pick"], ["⏎", "choose"], ["Esc", "back"]]);
+		hint([["↑↓", "pick", () => move(1)], ["⏎", "choose", choose], ["Esc", "back", back]]);
 	}
 
 	// Built once per right-arrow and thrown away on Escape or save. Three rows,
@@ -2032,15 +2064,27 @@ function build(w) {
 		nRow.append(nIn);
 		panel.append(nRow);
 
+		// Escape means "back one row", and only closes from the first one — same
+		// as the key does.
+		const back = () => (stage > 0 ? setStage(stage - 1) : closePanel());
+		const pick = () => {
+			if (!shown.length) return;
+			sel = (sel + 1) % shown.length;
+			paintDrop();
+		};
 		const panelHints = () => {
 			if (stage === 0) {
-				hint([["⏎", "file here"], ["⇥", "add tags"], ["↑↓", "pick"],
-					["Esc", "back"]]);
+				hint([["⏎", "file here", () => commit()], ["⇥", "add tags", () => setStage(1)],
+					["↑↓", "pick", pick], ["Esc", "back", back]]);
 			} else if (stage === 1) {
-				hint([["⏎", tIn.value.trim() ? "add tag" : "file"], ["⇥", "add note"],
-					["⇧⇥", "back"], ["Esc", "cancel"]]);
+				hint([["⏎", tIn.value.trim() ? "add tag" : "file",
+					() => (tIn.value.trim() ? takeTag() : commit())],
+					["⇥", "add note", () => setStage(2)],
+					["⇧⇥", "back", () => setStage(0)], ["Esc", "cancel", back]]);
 			} else {
-				hint([["⏎", "file"], ["⇧⏎", "newline"], ["⇧⇥", "back"], ["Esc", "cancel"]]);
+				// Nothing to click about a modifier: ⇧⏎ describes the key alone.
+				hint([["⏎", "file", () => commit()], ["⇧⏎", "newline"],
+					["⇧⇥", "back", () => setStage(1)], ["Esc", "cancel", back]]);
 			}
 		};
 
