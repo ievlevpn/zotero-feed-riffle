@@ -1,7 +1,7 @@
 // Self-check: node test.js  (exits non-zero on failure)
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
-	foldLibraryRows, heldPhrase } = require("./bootstrap.js");
+	foldLibraryRows, heldPhrase, ringSel } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -254,3 +254,10 @@ assert.strictEqual(heldPhrase(1, 1), "1 note and 1 annotation", "singulars");
 assert.strictEqual(heldPhrase(0, 3), "3 annotations", "no empty half");
 assert.strictEqual(heldPhrase(0, 0), "nothing of yours",
 	"the case where trashing it is the obvious answer");
+
+// --- ringSel: the tag dropdown keeps a slot for what you actually typed ----
+assert.strictEqual(ringSel(-1, 1, 3), 0, "down from your own text picks the first row");
+assert.strictEqual(ringSel(-1, -1, 3), 2, "up from it picks the last");
+assert.strictEqual(ringSel(2, 1, 3), -1, "past the end comes back to your text");
+assert.strictEqual(ringSel(0, -1, 3), -1, "and so does going up off the top");
+assert.strictEqual(ringSel(-1, 1, 0), -1, "no suggestions: nowhere else to be");

@@ -79,11 +79,15 @@ each. Pick one to riffle just that feed, or *All feeds* for everything at once.
 the full collection path, so `prs` finds *Probability / SPDEs* and
 `paths rough` finds *Probability / Rough paths*.
 
-<kbd>Tab</kbd> instead of <kbd>Enter</kbd> opens a tag box (fuzzy-completing
-your existing tags; <kbd>Enter</kbd> commits a tag, <kbd>Enter</kbd> on an
-empty box files the item). <kbd>Tab</kbd> again opens a note box, where
-<kbd>Enter</kbd> files and <kbd>Shift</kbd>+<kbd>Enter</kbd> makes a newline.
-<kbd>Esc</kbd> steps back one row at a time.
+<kbd>Tab</kbd> instead of <kbd>Enter</kbd> opens a tag box. It fuzzy-completes
+your existing tags, but what you typed is what you get: a suggestion only wins
+once you go to it with <kbd>↑</kbd><kbd>↓</kbd> or the mouse, since a tag you
+are inventing often starts out looking like one you already have.
+<kbd>Enter</kbd> commits the tag; on an empty box it moves on to the note rather
+than filing, so a stray second <kbd>Enter</kbd> cannot save the item early.
+<kbd>Tab</kbd> again opens the note box, where <kbd>Enter</kbd> files and
+<kbd>Shift</kbd>+<kbd>Enter</kbd> makes a newline. <kbd>Esc</kbd> steps back one
+row at a time.
 
 ## How it stores things
 

@@ -44,7 +44,7 @@ const out = { addons: { [z.id]: { updates: [{
 fs.writeFileSync("update.json", JSON.stringify(out, null, 2) + "\n");
 '
 
-git add manifest.json bootstrap.js release.sh update.json locale icon.svg katex.min.js katex.min.css fonts
+git add manifest.json bootstrap.js release.sh test.js README.md update.json locale icon.svg katex.min.js katex.min.css fonts
 # The notes ride along in the commit body, as bullets, where the changelog below
 # reads them back out. An array, because an unquoted ${BODY:+...} would split a
 # note on its spaces into one -m argument per word.
