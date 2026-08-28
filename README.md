@@ -59,15 +59,17 @@ is destroyed and <kbd>u</kbd> puts it straight back.
 The collections the old copy is in are hoisted to the top of the picker, marked
 *already in* — usually where the new version belongs too.
 
-When a feed runs out, the finish screen sums up the sitting — *11 kept · 4
-discarded · 3 skipped · 14 min · 47 s a card* — counting only the time cards
-were actually in front of you, since a gap longer than five minutes was lunch
-rather than reading. The tally follows you from feed to feed and resets when the
-window opens. *hide this*, under it, turns the summary off for good; the finish
-screen then carries a faint *summary* in the same place, and nowhere else, to
-turn it back on.
+**Stopping sums up the sitting.** <kbd>Esc</kbd> shows *11 kept · 4 discarded ·
+3 skipped · 14 min · 47 s a card* and how much of the deck keeps for later;
+<kbd>Esc</kbd> again closes, an arrow puts you back on the card you were on.
+Only the time a card was actually in front of you is counted, since a gap longer
+than five minutes was lunch rather than reading, and the tally follows you from
+feed to feed, resetting when the window opens. The same figures end a deck you
+finish. *hide this*, underneath, turns the summary off for good — <kbd>Esc</kbd>
+then simply closes — and a faint *summary* is left in its place, there and
+nowhere else, to turn it back on.
 
-The finish screen also lists the feeds that still have unread
+When a feed runs out, the finish screen also lists the feeds that still have unread
 items, with their counts — <kbd>Enter</kbd> carries straight on into the top one.
 Reaching the end is when you are most likely to want another, so it is offered
 rather than left for you to go and find.

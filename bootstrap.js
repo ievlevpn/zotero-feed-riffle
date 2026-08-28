@@ -1698,6 +1698,7 @@ function build(w) {
 	// the cursor twice — the item in between was never shown.
 	let busy = false;
 	let skipped = 0; // this session, for the count on the done screen
+	let ending = false; // showing the summary on the way out
 	const guard = (p) => {
 		busy = true;
 		return p.finally(() => { busy = false; });
@@ -1744,7 +1745,7 @@ function build(w) {
 		["o", "open", openURL],
 		["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
 			() => setScale(fontScale - SIZE_STEP)]],
-		["Esc", "close", () => w.close()],
+		["Esc", "close", stop],
 	]);
 
 	// --- the card ---------------------------------------------------------
@@ -1760,11 +1761,58 @@ function build(w) {
 		}
 	}
 
+	// What the sitting came to. Quiet by design — it is the last thing between
+	// you and the door, not a scoreboard — and it can be turned off from
+	// itself, with the way back in the same place and nowhere else.
+	function summaryBox() {
+		const line = summaryLine(stat.kept, stat.dropped, stat.skipped, stat.spent);
+		if (!line) return null;
+		const box = el(doc, "div", "sum");
+		const quiet = (label, on) => {
+			const b = el(doc, "button", "quiet", label);
+			b.addEventListener("mousedown", (e) => {
+				e.preventDefault();
+				safe(() => Zotero.Prefs.set(STATS_PREF, on));
+				render();
+			});
+			return b;
+		};
+		if (summaryOn()) box.append(el(doc, "div", "figures", line), quiet("hide this", false));
+		else box.append(quiet("summary", true));
+		return box;
+	}
+
 	function draw() {
 		if (panel) { panel.remove(); panel = null; }
 		cardBox.className = "card " + dir;
 		cardBox.replaceChildren();
 		cardBox.scrollTop = 0;
+
+		// Stopping half-way is the ordinary way to finish, so the summary belongs
+		// here rather than only at the end of a deck. Esc again closes.
+		if (ending) {
+			cardBox.className = "card";
+			const done = el(doc, "div", "done");
+			const left = Math.max(0, ids.length - cursor);
+			done.append(
+				el(doc, "div", "big", "✓"),
+				el(doc, "div", null, left
+					? `${left} still unread — they keep.`
+					: "Nothing left in this feed."),
+			);
+			const sum = summaryBox();
+			if (sum) done.append(sum);
+			cardBox.append(done);
+			nextFeeds = [];
+			nextDrop = null;
+			const resume = () => { ending = false; render(); };
+			hint([["Esc", "close", () => w.close()], ["⏎", "close", () => w.close()],
+				["←→", "keep riffling", resume],
+				["u", "undo", () => { ending = false; doUndo(); }]]);
+			feedName.textContent = "";
+			count.textContent = "";
+			return;
+		}
 
 		if (cursor >= ids.length) {
 			cardBox.className = "card";
@@ -1802,25 +1850,8 @@ function build(w) {
 				nextDrop = drop;
 			}
 
-			// What the sitting came to. Quiet by design — it is the last thing
-			// between you and closing the window, not a scoreboard — and it can
-			// be turned off from itself, with the way back in the same place.
-			const line = summaryLine(stat.kept, stat.dropped, stat.skipped, stat.spent);
-			if (line) {
-				const box = el(doc, "div", "sum");
-				const quiet = (label, on) => {
-					const b = el(doc, "button", "quiet", label);
-					b.addEventListener("mousedown", (e) => {
-						e.preventDefault();
-						safe(() => Zotero.Prefs.set(STATS_PREF, on));
-						render();
-					});
-					return b;
-				};
-				if (summaryOn()) box.append(el(doc, "div", "figures", line), quiet("hide this", false));
-				else box.append(quiet("summary", true));
-				done.append(box);
-			}
+			const sum = summaryBox();
+			if (sum) done.append(sum);
 
 			cardBox.append(done);
 			const pickNext = () => {
@@ -1987,6 +2018,15 @@ function build(w) {
 		stat.skipped++;
 		statTick();
 		advance();
+	};
+
+	// Esc stops riffling: the summary first, and Esc again to be gone. With the
+	// summary turned off, or nothing done to summarise, it just closes.
+	const stop = () => {
+		if (ending || !summaryOn()
+			|| !(stat.kept + stat.dropped + stat.skipped)) return w.close();
+		ending = true;
+		render();
 	};
 
 	const doUndo = () => {
@@ -2473,6 +2513,13 @@ function build(w) {
 			else if (e.key === "0") { e.preventDefault(); setScale(1); }
 			return;
 		}
+		// Stopped by mistake: an arrow puts you back on the card you were on,
+		// rather than acting on it sight unseen.
+		if (ending && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+			e.preventDefault();
+			ending = false;
+			return render();
+		}
 		switch (e.key) {
 			case "ArrowLeft": e.preventDefault(); doDiscard(); break;
 			case "ArrowRight": e.preventDefault(); openPanel(); break;
@@ -2484,9 +2531,10 @@ function build(w) {
 			case "o": e.preventDefault(); openURL(); break;
 			case "f": e.preventDefault(); openFeeds(); break;
 			case "r": if (cursor >= ids.length) { e.preventDefault(); reload().catch(oops); } break;
-			case "Escape": e.preventDefault(); w.close(); break;
+			case "Escape": e.preventDefault(); (ending ? w.close() : stop()); break;
 			case "Enter":
-				if (nextFeeds.length) { e.preventDefault(); goNext(); }
+				if (ending) { e.preventDefault(); w.close(); }
+				else if (nextFeeds.length) { e.preventDefault(); goNext(); }
 				break;
 			case "ArrowDown": case "ArrowUp": {
 				e.preventDefault();
