@@ -1,7 +1,8 @@
 // Self-check: node test.js  (exits non-zero on failure)
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
-	foldLibraryRows, heldPhrase, importerCut, imgMath } = require("./bootstrap.js");
+	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
+	summaryLine } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -289,3 +290,14 @@ assert.strictEqual(imgMath("https://latex.codecogs.com/gif.latex?%5Cdpi%7B110%7D
 assert.strictEqual(imgMath("https://i0.wp.com/math.ucr.edu/home/baez/meson_nonet.png"), null,
 	"a real picture stays a picture, and pictures are dropped");
 assert.strictEqual(imgMath(""), null);
+
+// --- the finish summary ---------------------------------------------------
+assert.strictEqual(fmtSpan(38000), "38 s");
+assert.strictEqual(fmtSpan(6 * 60 * 1000), "6 min");
+assert.strictEqual(fmtSpan(65 * 60 * 1000), "1 h 05 min", "padded, so the column lines up");
+assert.strictEqual(summaryLine(8, 4, 3, 6 * 60 * 1000),
+	"8 kept · 4 discarded · 3 skipped · 6 min · 24 s a card");
+assert.strictEqual(summaryLine(2, 0, 0, 30000), "2 kept · 30 s",
+	"nothing discarded, nothing skipped: neither is printed, and two cards set no pace");
+assert.strictEqual(summaryLine(0, 0, 0, 0), "",
+	"a window opened and closed again has nothing to say");

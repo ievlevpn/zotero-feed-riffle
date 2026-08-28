@@ -17,6 +17,7 @@ const LAST_PREF = "feedRiffle.lastCollection"; // collection id Enter defaults t
 const STATE_PREF = "feedRiffle.state";         // window geometry
 const SIZE_PREF = "feedRiffle.fontScale";      // your own +/- adjustment
 const RECENT_PREF = "feedRiffle.recentCollections"; // most recently filed into
+const STATS_PREF = "feedRiffle.summary";       // false: the finish summary stays off
 const RECENT_MAX = 9; // as many as there are number keys
 const BASE_PX = 15;   // reading size at scale 1, before Zotero's own setting
 // The text column, and the card's side padding, in rem. The stylesheet and the
@@ -56,6 +57,27 @@ const RIFFLE_ATTR = "data-feed-riffle"; // marks our window, across installs
 let fontScale = 1;     // multiplier on top of Zotero's font size, persisted
 
 const oops = (e) => Zotero.logError(e);
+
+// A gap longer than this was not reading, it was lunch, and counting it would
+// turn a ten-minute sitting into an afternoon.
+const IDLE_CAP = 5 * 60 * 1000;
+
+// The sitting, not the deck: opening the window resets these, moving on to the
+// next feed does not, so the summary covers everything you just did.
+const stat = { kept: 0, dropped: 0, skipped: 0, spent: 0, last: 0 };
+
+function statReset() {
+	Object.assign(stat, { kept: 0, dropped: 0, skipped: 0, spent: 0, last: Date.now() });
+}
+
+// Called as each card leaves: the time it was on screen is time spent reading.
+function statTick() {
+	const now = Date.now();
+	if (stat.last) stat.spent += Math.min(now - stat.last, IDLE_CAP);
+	stat.last = now;
+}
+
+const summaryOn = () => safe(() => Zotero.Prefs.get(STATS_PREF) !== false, true);
 
 function safe(fn, fallback) {
 	try { return fn(); }
@@ -252,6 +274,29 @@ function foldLibraryRows(rows) {
 		for (const k of refKeys(null, r.value)) keys.set(k, entry);
 	}
 	return keys;
+}
+
+// A span at a glance: "38 s", "6 min", "1 h 04 min". Exported for test.js.
+function fmtSpan(ms) {
+	const secs = Math.max(0, Math.round(ms / 1000));
+	if (secs < 60) return secs + " s";
+	const mins = Math.round(secs / 60);
+	if (mins < 60) return mins + " min";
+	return Math.floor(mins / 60) + " h " + String(mins % 60).padStart(2, "0") + " min";
+}
+
+// The sitting in one line. The pace is only worth printing once there are
+// enough cards behind it to mean anything. Exported for test.js.
+function summaryLine(kept, dropped, skipped, ms) {
+	const done = kept + dropped + skipped;
+	if (!done) return "";
+	const bits = [];
+	if (kept) bits.push(kept + " kept");
+	if (dropped) bits.push(dropped + " discarded");
+	if (skipped) bits.push(skipped + " skipped");
+	bits.push(fmtSpan(ms));
+	if (done >= 3 && ms >= 3000) bits.push(fmtSpan(ms / done) + " a card");
+	return bits.join(" · ");
 }
 
 // "2 notes and 14 annotations" — what the old copy is worth keeping for, and
@@ -1159,6 +1204,15 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .done .nextlabel { font-size:.72rem; letter-spacing:.05em; text-transform:uppercase;
 	color:GrayText; margin-bottom:.35rem; text-align:left; }
 /* The list is the same one the feed picker shows, without the popup around it. */
+/* The finish summary: figures first, then the way to be rid of them. Both are
+ * quieter than anything else on the screen — you came here to be finished. */
+.sum { margin-top:1.4rem; display:flex; flex-direction:column; align-items:center;
+	gap:.3rem; }
+.sum .figures { font-size:.82rem; color:GrayText; font-variant-numeric:tabular-nums; }
+.quiet { border:none; background:none; cursor:pointer; font:inherit;
+	font-size:.72rem; padding:.1rem .3rem; border-radius:4px;
+	color:color-mix(in srgb, GrayText 55%, Canvas); }
+.quiet:hover { color:GrayText; background:color-mix(in srgb, GrayText 12%, Canvas); }
 .done .drop { position:static; max-height:none; box-shadow:none;
 	border:1px solid color-mix(in srgb, GrayText 35%, Canvas); }
 
@@ -1417,9 +1471,11 @@ function open(libraryID) {
 	if (!main) return;
 	scopeLib = libraryID || null;
 	if (win && !win.closed) {
+		// Already riffling: the tally carries on across feeds.
 		win.focus();
 		return reload();
 	}
+	statReset();
 	// about:blank rather than a packaged XHTML: opened from a chrome window it
 	// inherits chrome privileges, and the whole document is built here anyway.
 	// Before opening: anything still around under our name belongs to a previous
@@ -1746,6 +1802,26 @@ function build(w) {
 				nextDrop = drop;
 			}
 
+			// What the sitting came to. Quiet by design — it is the last thing
+			// between you and closing the window, not a scoreboard — and it can
+			// be turned off from itself, with the way back in the same place.
+			const line = summaryLine(stat.kept, stat.dropped, stat.skipped, stat.spent);
+			if (line) {
+				const box = el(doc, "div", "sum");
+				const quiet = (label, on) => {
+					const b = el(doc, "button", "quiet", label);
+					b.addEventListener("mousedown", (e) => {
+						e.preventDefault();
+						safe(() => Zotero.Prefs.set(STATS_PREF, on));
+						render();
+					});
+					return b;
+				};
+				if (summaryOn()) box.append(el(doc, "div", "figures", line), quiet("hide this", false));
+				else box.append(quiet("summary", true));
+				done.append(box);
+			}
+
 			cardBox.append(done);
 			const pickNext = () => {
 				nextSel = (nextSel + 1) % nextFeeds.length;
@@ -1864,6 +1940,9 @@ function build(w) {
 	// card you were on has already left, so put it back.
 	const stepBack = (e, what) => {
 		oops(e);
+		// The card is coming back, so it is not on the tally either.
+		const kind = what === "Discard" ? "dropped" : "kept";
+		stat[kind] = Math.max(0, stat[kind] - 1);
 		flash(what + " failed — see the error console");
 		dir = "from-left";
 		cursor = Math.max(0, cursor - 1);
@@ -1873,6 +1952,8 @@ function build(w) {
 	const doDiscard = () => {
 		const item = current();
 		if (!item || busy) return;
+		stat.dropped++;
+		statTick();
 		step("left");
 		guard(discard(item)).catch((e) => stepBack(e, "Discard"));
 	};
@@ -1886,6 +1967,8 @@ function build(w) {
 		if (!id) return flash("No recent collection " + n);
 		const path = (colls.find((c) => c.id === id) || {}).path;
 		if (!path) return flash("That collection is gone");
+		stat.kept++;
+		statTick();
 		step("right");
 		guard(keep(item, id, [], "").then(() => flash("→ " + path)))
 			.catch((e) => stepBack(e, "Save"));
@@ -1901,6 +1984,8 @@ function build(w) {
 		// card. toggleRead(false) on an item that was never read is a no-op.
 		undoStack.push({ id: item.id, skip: true });
 		skipped++;
+		stat.skipped++;
+		statTick();
 		advance();
 	};
 
@@ -1908,6 +1993,9 @@ function build(w) {
 		if (busy) return;
 		guard(undo().then((was) => {
 			if (!was) return flash("Nothing to undo");
+			// Take it off the tally as well: an undone card was never read.
+			const kind = was.skip ? "skipped" : was.revert ? "kept" : "dropped";
+			stat[kind] = Math.max(0, stat[kind] - 1);
 			if (was.skip) skipped = Math.max(0, skipped - 1);
 			dir = "from-left";
 			// The undone item is the one before the cursor, unless we already
@@ -2290,6 +2378,8 @@ function build(w) {
 				.filter((t, i, a) => t && a.indexOf(t) === i);
 			const feedItem = item;
 			closePanel();
+			stat.kept++;
+			statTick();
 			step("right");
 			guard(keep(feedItem, c.id, finalTags, nIn.value.trim(), dropOld)
 				.then((dropped) =>
@@ -2484,5 +2574,5 @@ if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
-		heldPhrase, importerCut, imgMath };
+		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine };
 }
