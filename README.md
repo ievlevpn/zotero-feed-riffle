@@ -128,6 +128,13 @@ link when there is no file — which is every feed card, so nothing changes ther
 Tags Zotero has given a colour keep it, on the card and in the tag box, and come
 first in its order, the way they do in the items list.
 
+<kbd>p</kbd> shows the file's first page in place of the description, drawn by
+Zotero's own reader — the one the item pane previews with. An item with no
+description shows it without being asked, since there is nothing else to read;
+otherwise the description stays and <kbd>p</kbd> is how you look at the page.
+It lasts for the card you pressed it on: the reader is torn down before the next
+card is drawn, so riffling never carries one along.
+
 <kbd>f</kbd>, or the collection's name in the header, switches to another
 collection without leaving the window — the same picker feeds get, fuzzy-matching
 the full path and carrying each collection's item count.

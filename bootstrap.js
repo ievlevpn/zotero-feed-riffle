@@ -1099,6 +1099,24 @@ function paintTag(node, color) {
 	node.style.color = "color-mix(in srgb, " + color + " 70%, CanvasText)";
 }
 
+// The file a card could show a page of, if it has one. getBestAttachment is
+// the same choice Zotero makes when you open an item from the items list, and
+// it is async, so the answer is remembered and the card redrawn when it lands.
+const attachments = new Map(); // itemID → attachment item, or null for none
+
+function attachmentFor(item, redraw) {
+	if (attachments.has(item.id)) return attachments.get(item.id);
+	if (safe(() => item.isFeedItem, false)) {
+		attachments.set(item.id, null);
+		return null;
+	}
+	safe(() => item.getBestAttachment().then((att) => {
+		attachments.set(item.id, att || null);
+		if (att && redraw) redraw();
+	}).catch(oops));
+	return undefined; // not known yet; the card draws without it
+}
+
 // --- managing a collection -------------------------------------------------
 
 // The tags the item should end up with, rather than a list to add: a chip you
@@ -1361,6 +1379,22 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 @keyframes outRight { to { transform:translateX(105%); } }
 .ghost.out-left  { animation:outLeft .18s cubic-bezier(.35,0,.9,1) forwards; }
 .ghost.out-right { animation:outRight .18s cubic-bezier(.35,0,.9,1) forwards; }
+
+/* The file's first page, in the space the description would have had. Its own
+ * frame rather than a picture of one: this is Zotero's reader, the same one the
+ * item pane previews with. */
+.preview { position:relative; margin-top:.4rem; height:min(72vh, 820px);
+	border-radius:6px; overflow:hidden;
+	border:1px solid color-mix(in srgb, GrayText 30%, Canvas); }
+.preview iframe { position:absolute; inset:0; width:100%; height:100%;
+	border:none; opacity:0; transition:opacity .12s ease-out; }
+/* Only once the reader has drawn something: an empty frame flashing white in
+ * the middle of a dark card is worse than the line it replaces. */
+.preview.ready iframe { opacity:1; }
+.preview .abs.empty { position:absolute; inset:0; display:flex;
+	align-items:center; justify-content:center; margin:0; }
+.preview.ready .abs.empty { display:none; }
+.preview.failed .abs.empty::after { content:" — it would not open"; }
 
 /* 3. A long description that continues past the fold says so, instead of
  * looking exactly like one that has ended. */
@@ -1721,6 +1755,7 @@ async function reload() {
 		total = ids.length;
 		cursor = 0;
 		cache.clear();
+		attachments.clear();
 		undoStack = [];
 		colls = flatCollections();
 		// Only the deck that offers them pays for the counts.
@@ -1901,6 +1936,9 @@ function build(w) {
 	let busy = false;
 	let skipped = 0; // this session, for the count on the done screen
 	let ending = false; // showing the summary on the way out
+	let reader = null;  // the file preview on the card, when one is open
+	let previewAtt = 0; // the attachment it is for, so a late one can be dropped
+	let previewing = false; // p, and only for the card you pressed it on
 	const guard = (p) => {
 		busy = true;
 		return p.finally(() => { busy = false; });
@@ -1953,7 +1991,7 @@ function build(w) {
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
 			["n", "note", () => openPanel(manageJob("note", current()))],
 			["m", "move to", () => openPanel(manageJob("move", current()))],
-			["x", "trash", doTrash], ["u", "undo", doUndo],
+			["x", "trash", doTrash], ["p", "page", doPreview], ["u", "undo", doUndo],
 			["f", "collection", openFeeds], ["o", "open", openURL],
 			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
 				() => setScale(fontScale - SIZE_STEP)]],
@@ -2067,8 +2105,42 @@ function build(w) {
 		count.textContent = "";
 	}
 
+	// Zotero's own reader, drawing the file's first page — the one the item pane
+	// previews with. A card at a time: the reader is torn down before the next
+	// card is drawn, so riffling never carries one along.
+	const dropReader = () => {
+		if (!reader) return;
+		safe(() => reader.uninit());
+		reader = null;
+	};
+
+	function previewNode(att) {
+		const box = el(doc, "div", "preview");
+		box.append(el(doc, "div", "abs empty", "Opening the file…"));
+		const frame = doc.createElement("iframe");
+		frame.setAttribute("src", "resource://zotero/reader/reader.html");
+		frame.setAttribute("transparent", "transparent");
+		// The reader needs its own document before it can be started, and it
+		// needs tearing down again if you have moved on by the time it is.
+		frame.addEventListener("load", () => {
+			const mine = att.id;
+			safe(() => Zotero.Reader.openPreview(att.id, frame).then(async (r) => {
+				if (!frame.isConnected || previewAtt !== mine) return safe(() => r.uninit());
+				reader = r;
+				await r._open({});
+				box.classList.add("ready");
+			}).catch((e) => {
+				oops(e);
+				box.classList.add("failed");
+			}));
+		}, { once: true });
+		box.append(frame);
+		return box;
+	}
+
 	function draw() {
 		if (panel) { panel.remove(); panel = null; }
+		dropReader();
 		cardBox.className = "card " + dir;
 		cardBox.replaceChildren();
 		cardBox.scrollTop = 0;
@@ -2145,9 +2217,14 @@ function build(w) {
 			cardBox.append(row);
 		}
 
-		cardBox.append(body
-			? abstractNode(doc, body, item.getField("url"))
-			: el(doc, "div", "abs empty", "No abstract."));
+		// The page of the file instead of the description: always when there is
+		// no description to show, and on p when there is.
+		const att = attachmentFor(item, render);
+		previewAtt = (att && (previewing || !body)) ? att.id : 0;
+		if (previewAtt) cardBox.append(previewNode(att));
+		else if (body) cardBox.append(abstractNode(doc, body, item.getField("url")));
+		else if (att === undefined) cardBox.append(el(doc, "div", "abs empty", "Looking for a file…"));
+		else cardBox.append(el(doc, "div", "abs empty", "No abstract."));
 
 		// Said plainly, because nothing else on the card would give it away: the
 		// text simply stops, reading like a short abstract rather than a lost one.
@@ -2179,7 +2256,12 @@ function build(w) {
 
 	// entry: "" when a card is flying off, since the next one is simply revealed
 	// underneath. Skip and undo have no ghost, so they get a slide of their own.
-	const advance = (entry) => { dir = entry === undefined ? "from-right" : entry; cursor++; render(); };
+	const advance = (entry) => {
+		dir = entry === undefined ? "from-right" : entry;
+		previewing = false;
+		cursor++;
+		render();
+	};
 
 	// The deck turns in the same frame the ghost starts moving, not when the
 	// write lands. Waiting made the two directions look different: filing does
@@ -2205,6 +2287,7 @@ function build(w) {
 		if (busy || cursor <= 0) return;
 		statTick();
 		dir = "from-left";
+		previewing = false;
 		cursor--;
 		render();
 	};
@@ -2212,6 +2295,19 @@ function build(w) {
 		if (busy || cursor >= ids.length) return;
 		statTick();
 		advance();
+	};
+
+	// The file's first page, for the card you are on. It goes back to the
+	// description when you move on: a reader for every card would be the thing
+	// that made riffling feel slow.
+	const doPreview = () => {
+		const item = current();
+		if (!item || busy) return;
+		const att = attachmentFor(item, render);
+		if (att === undefined) return flash("Still looking for a file…");
+		if (!att) return flash("No file on this item");
+		previewing = !previewing;
+		render();
 	};
 
 	// Zotero's trash, so nothing is destroyed and undo puts it back in place.
@@ -2895,6 +2991,13 @@ function build(w) {
 	// handler per build and every copy fires — one arrow press would discard
 	// two items. Kept on the window rather than in this scope: after a
 	// reinstall the new sandbox still has to be able to unhook the old one.
+	// The reader holds listeners of its own, so it is torn down with the window
+	// as well as with the card. Hooked the same way as the key handler: after a
+	// reinstall the new sandbox still has to be able to unhook the old one.
+	safe(() => { if (w._riffleDrop) w.removeEventListener("unload", w._riffleDrop); });
+	w._riffleDrop = () => dropReader();
+	w.addEventListener("unload", w._riffleDrop);
+
 	safe(() => { if (w._riffleKey) doc.removeEventListener("keydown", w._riffleKey); });
 	const keyHandler = (e) => {
 		if (panel || menu) return; // the panel or feed picker handled it
@@ -2923,6 +3026,7 @@ function build(w) {
 				case "t": e.preventDefault(); return openPanel(manageJob("tags", current()));
 				case "n": e.preventDefault(); return openPanel(manageJob("note", current()));
 				case "x": e.preventDefault(); return doTrash();
+				case "p": e.preventDefault(); return doPreview();
 				case "s": e.preventDefault(); return;
 				default: break;
 			}
