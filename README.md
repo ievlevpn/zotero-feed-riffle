@@ -128,6 +128,10 @@ link when there is no file — which is every feed card, so nothing changes ther
 Tags Zotero has given a colour keep it, on the card and in the tag box, and come
 first in its order, the way they do in the items list.
 
+<kbd>f</kbd>, or the collection's name in the header, switches to another
+collection without leaving the window — the same picker feeds get, fuzzy-matching
+the full path and carrying each collection's item count.
+
 The finish summary counts in the same terms: *6 of 24 seen, 18 still to look at*
 and *5 changed · 1 trashed · 12 min*.
 

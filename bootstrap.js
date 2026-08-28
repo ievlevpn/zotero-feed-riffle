@@ -49,6 +49,7 @@ let cursor = 0;        // index into ids of the card on screen
 let total = 0;         // ids.length when the window opened, for the counter
 const cache = new Map(); // itemID → Zotero.Item, filled a window at a time
 let colls = [];        // [{ id, path }] every collection you can file into
+let collRows = [];     // the same, with counts, for the picker on a collection deck
 let allTags = [];      // every tag name in the library, for the tag picker
 let undoStack = [];    // {id, revert} — revert absent for a discard or a skip
 let scopeLib = null;   // feed libraryID to riffle, or null for every feed
@@ -933,6 +934,21 @@ function libraryCopy(feedItem) {
 	return null;
 }
 
+// How many items each collection holds — regular items, nothing in the trash,
+// which is what a deck of it would be. One query rather than one per row.
+async function collectionCounts() {
+	const sql = "SELECT ci.collectionID AS id, COUNT(*) AS n FROM collectionItems ci "
+		+ "JOIN items i ON i.itemID = ci.itemID "
+		+ "WHERE i.itemTypeID NOT IN (SELECT itemTypeID FROM itemTypes "
+		+ "WHERE typeName IN ('attachment','note','annotation')) "
+		+ "AND i.itemID NOT IN (SELECT itemID FROM deletedItems) "
+		+ "GROUP BY ci.collectionID";
+	const rows = (await Zotero.DB.queryAsync(sql)) || [];
+	const out = new Map();
+	for (const r of rows) out.set(r.id, r.n);
+	return out;
+}
+
 // Collections you have filed into lately, most recent first — the ones the
 // number keys reach.
 function recentIDs() {
@@ -1192,10 +1208,6 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	transition:background .12s; }
 .head .feed:hover { background:color-mix(in srgb, GrayText 20%, Canvas); }
 .head .feed::after { content:" ▾"; opacity:.65; }
-/* A collection deck has nothing to switch to, so the name is just a name. */
-.head .feed.plain { cursor:default; }
-.head .feed.plain:hover { background:none; }
-.head .feed.plain::after { content:none; }
 /* The done screen clears the name; without this its caret hangs there alone. */
 .head .feed:empty { padding:0; }
 .head .feed:empty::after { content:none; }
@@ -1711,6 +1723,12 @@ async function reload() {
 		cache.clear();
 		undoStack = [];
 		colls = flatCollections();
+		// Only the deck that offers them pays for the counts.
+		if (isFeedMode()) collRows = [];
+		else {
+			const counts = await collectionCounts();
+			collRows = colls.map((c) => ({ id: c.id, name: c.path, n: counts.get(c.id) || 0 }));
+		}
 		allTags = await loadTags();
 		libKeys = await loadLibraryKeys();
 		await hydrate(0);
@@ -1748,31 +1766,37 @@ function build(w) {
 		w.focus();
 	};
 
+	// The same list either way: what else this window could be riffling. Feeds
+	// carry what is unread in them, collections what is in them.
 	const openFeeds = () => {
-		if (!isFeedMode() || menu) return closeFeeds();
-		const rows = feedRows();
-		if (rows.length < 2) return flash("No feeds");
+		if (menu) return closeFeeds();
+		const feed = isFeedMode();
+		const rows = feed ? feedRows() : collRows;
+		if (rows.length < 2) return flash(feed ? "No feeds" : "No collections");
 		menu = el(doc, "div", "feedpick");
 		const input = doc.createElement("input");
 		input.type = "text";
-		input.placeholder = "Search feeds…";
+		input.placeholder = feed ? "Search feeds…" : "Search collections…";
 		const drop = el(doc, "div", "drop");
 		menu.append(input, drop);
 		head.append(menu);
 
 		let shown = rows;
-		// Opens on whichever feed you are already riffling.
-		let sel = Math.max(0, rows.findIndex((r) => r.id === scopeLib));
+		// Opens on whichever one you are already riffling.
+		const here = feed ? scopeLib : scopeColl;
+		let sel = Math.max(0, rows.findIndex((r) => r.id === here));
 
 		const paint = () => {
 			drop.replaceChildren();
 			if (!shown.length) {
-				drop.append(el(doc, "div", "none", "No matching feed"));
+				drop.append(el(doc, "div", "none",
+					feed ? "No matching feed" : "No matching collection"));
 				return;
 			}
 			shown.forEach((r, i) => {
 				const row = el(doc, "div", i === sel ? "on" : null);
-				row.append(el(doc, "span", null, r.name), el(doc, "b", null, String(r.n)));
+				row.append(el(doc, "span", null, r.name),
+					el(doc, "b", null, r.n === null ? "" : String(r.n)));
 				row.addEventListener("mousedown", (e) => { e.preventDefault(); sel = i; choose(); });
 				drop.append(row);
 			});
@@ -1783,8 +1807,9 @@ function build(w) {
 		const choose = () => {
 			const r = shown[sel];
 			closeFeeds();
-			if (!r || r.id === scopeLib) return;
-			scopeLib = r.id;
+			if (!r || r.id === here) return;
+			if (feed) scopeLib = r.id;
+			else scopeColl = r.id;
 			reload().catch(oops);
 		};
 
@@ -1814,7 +1839,7 @@ function build(w) {
 		input.focus();
 	};
 
-	feedName.addEventListener("click", () => { if (isFeedMode()) openFeeds(); });
+	feedName.addEventListener("click", openFeeds);
 
 	const cardBox = el(doc, "div", "card");
 	// Links open in the real browser: this window is the riffle UI, and
@@ -1928,7 +1953,8 @@ function build(w) {
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
 			["n", "note", () => openPanel(manageJob("note", current()))],
 			["m", "move to", () => openPanel(manageJob("move", current()))],
-			["x", "trash", doTrash], ["u", "undo", doUndo], ["o", "open", openURL],
+			["x", "trash", doTrash], ["u", "undo", doUndo],
+			["f", "collection", openFeeds], ["o", "open", openURL],
 			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
 				() => setScale(fontScale - SIZE_STEP)]],
 			["Esc", "close", stop]]);
@@ -2070,10 +2096,7 @@ function build(w) {
 			return;
 		}
 
-		// The name is a feed switcher on a feed deck and a label on a collection
-		// one: there is no other collection this deck could turn into.
-		feedName.className = isFeedMode() ? "feed" : "feed plain";
-		feedName.title = isFeedMode() ? "Switch feed" : "";
+		feedName.title = isFeedMode() ? "Switch feed" : "Switch collection";
 		feedName.textContent = isFeedMode()
 			? safe(() => Zotero.Libraries.get(item.libraryID).name, "")
 			: safe(() => Zotero.Collections.get(scopeColl).name, "");
@@ -2900,7 +2923,7 @@ function build(w) {
 				case "t": e.preventDefault(); return openPanel(manageJob("tags", current()));
 				case "n": e.preventDefault(); return openPanel(manageJob("note", current()));
 				case "x": e.preventDefault(); return doTrash();
-				case "s": case "f": e.preventDefault(); return;
+				case "s": e.preventDefault(); return;
 				default: break;
 			}
 		}
