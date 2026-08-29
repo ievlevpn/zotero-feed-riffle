@@ -207,6 +207,10 @@ clock is this plugin's own, so it stops counting after five idle minutes on a
 card. Riffling a collection is not logged: those items have their own reading
 time already.
 
+Once logging is on, the finish screen also carries a note field — `n` to reach
+it — for a line about what the sitting was. It goes on the same *Feed reading*
+row, in the field Reading Time's own timer notes use.
+
 The answer lives in `extensions.zotero.feedRiffle.readingTime`; clear it in the
 config editor to be asked again. Without Reading Time installed nothing here
 appears, and nothing changes.

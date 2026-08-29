@@ -376,7 +376,7 @@ const withAPI = (v) => {
 	stat.last = 0;         // and no card on screen, so statTick() adds nothing
 	bankTime();
 };
-const real = { apiVersion: 1, addFeedSession: (s, at) => (banked.push([s, at]), true) };
+const real = { apiVersion: 1, addFeedSession: (s, at, n) => (banked.push([s, at, n]), true) };
 
 answer = undefined;
 withAPI(real);
@@ -392,9 +392,20 @@ withAPI({ apiVersion: 2, addFeedSession: () => true });
 assert.strictEqual(banked.length, 0, "nor for an API we do not know how to call");
 
 withAPI(real);
-assert.deepStrictEqual(banked, [[900, stat.began]], "accepted: one row, in seconds, from when it began");
+assert.deepStrictEqual(banked, [[900, stat.began, null]], "accepted: one row, in seconds, from when it began");
 assert.ok(stat.banked, "and it is not written twice");
 bankTime();
 assert.strictEqual(banked.length, 1);
+
+// A note typed on the end screen rides along on the same row.
+banked.length = 0;
+withAPI(real);          // banks once, noteless
+stat.banked = false;
+stat.note = "arXiv math.PR";
+bankTime();
+assert.deepStrictEqual(banked[1], [900, stat.began, "arXiv math.PR"],
+	"the note is banked with the sitting");
+statReset();
+assert.strictEqual(stat.note, null, "and a new sitting starts without one");
 
 console.log("ok");

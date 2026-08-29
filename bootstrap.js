@@ -84,11 +84,11 @@ const IDLE_CAP = 5 * 60 * 1000;
 
 // The sitting, not the deck: opening the window resets these, moving on to the
 // next feed does not, so the summary covers everything you just did.
-const stat = { kept: 0, dropped: 0, skipped: 0, spent: 0, last: 0, began: 0, banked: false };
+const stat = { kept: 0, dropped: 0, skipped: 0, spent: 0, last: 0, began: 0, banked: false, note: null };
 
 function statReset() {
 	const now = Date.now();
-	Object.assign(stat, { kept: 0, dropped: 0, skipped: 0, spent: 0, last: now, began: now, banked: false });
+	Object.assign(stat, { kept: 0, dropped: 0, skipped: 0, spent: 0, last: now, began: now, banked: false, note: null });
 }
 
 // Called as each card leaves: the time it was on screen is time spent reading.
@@ -124,7 +124,7 @@ function bankTime() {
 	if (!isFeedMode() || stat.banked || rtAnswer() !== true) return;
 	statTick();
 	const api = readingTime();
-	if (api && api.addFeedSession(Math.round(stat.spent / 1000), stat.began)) {
+	if (api && api.addFeedSession(Math.round(stat.spent / 1000), stat.began, stat.note)) {
 		stat.banked = true;
 	}
 }
@@ -1585,6 +1585,14 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	color:color-mix(in srgb, GrayText 55%, Canvas); }
 .quiet:hover { color:GrayText; background:color-mix(in srgb, GrayText 12%, Canvas); }
 .asks { display:flex; gap:.2rem; }
+/* The note field: a line on the same page as the figures it belongs to, and as
+ * quiet as they are until you are actually in it. */
+.sum input.note { width:min(22rem, 80vw); box-sizing:border-box; text-align:center;
+	font:.82rem/1.5 system-ui, -apple-system, sans-serif;
+	background:Canvas; color:CanvasText; padding:.25rem .5rem; border-radius:5px;
+	border:1px solid color-mix(in srgb, GrayText 30%, Canvas); }
+.sum input.note:focus { outline:none; border-color:Highlight; text-align:left;
+	box-shadow:0 0 0 2px color-mix(in srgb, Highlight 30%, transparent); }
 /* The message around it is grey because it is a message. This is a list you
  * pick from with the arrows, the same one the feed picker shows, so it reads in
  * ordinary text rather than looking switched off. */
@@ -2099,6 +2107,7 @@ function build(w) {
 	let nextFeeds = [];     // feeds still waiting, offered on the done screen
 	let nextSel = 0;
 	let nextDrop = null;    // that list, so moving the selection need not redraw
+	let noteInput = null;   // the end screen's note field, while one is up
 
 	// Moving the selection repaints the rows in place. Going through render()
 	// would re-enter draw(), which rebuilds the list and resets nextSel — so the
@@ -2212,6 +2221,7 @@ function build(w) {
 	// --- the card ---------------------------------------------------------
 
 	function render() {
+		noteInput = null;   // whatever is drawn next puts back its own, or none
 		try { draw(); }
 		catch (e) {
 			oops(e);
@@ -2279,6 +2289,29 @@ function build(w) {
 		return box;
 	}
 
+	// A line about the sitting, carried into the Reading Time row banked as the
+	// window closes. Only where there is going to be a row: the question already
+	// answered yes, the other plugin still there, and enough on the clock for it
+	// to be kept. Never focused on arrival — the arrows and Enter belong to the
+	// feed list until you ask for the field with `n`.
+	function noteBox() {
+		if (!isFeedMode() || rtAnswer() !== true || !readingTime()) return null;
+		statTick();
+		if (stat.spent < 60000) return null;
+		const box = el(doc, "div", "sum");
+		noteInput = doc.createElement("input");
+		noteInput.type = "text";
+		noteInput.className = "note";
+		noteInput.placeholder = "What this sitting was…";
+		noteInput.value = stat.note || "";
+		// Kept on every keystroke, so closing the window mid-word still keeps it.
+		noteInput.addEventListener("input", () => {
+			stat.note = noteInput.value.trim() || null;
+		});
+		box.append(noteInput);
+		return box;
+	}
+
 	// Where riffling ends. `stopped` only says how you got here: by pressing Esc
 	// on a card, rather than by running the deck out.
 	function endScreen(stopped) {
@@ -2297,6 +2330,9 @@ function build(w) {
 
 		const ask = askBox();
 		if (ask) done.append(ask);
+
+		const note = noteBox();
+		if (note) done.append(note);
 
 		// Reaching the end of one feed is the moment you are most likely to want
 		// another, so the ones still waiting are offered here rather than left
@@ -2336,6 +2372,7 @@ function build(w) {
 				? [["⏎", "next feed", () => goNext()], ["↑↓", "pick", pickNext]]
 				: [["⏎", "close", () => w.close()]])
 			.concat(stopped && left ? [["←→", "keep riffling", resume]] : [])
+			.concat(noteInput ? [["n", "note", () => noteInput.focus()]] : [])
 			.concat([["u", "undo", () => { ending = false; doUndo(); }]])
 			.concat(nextFeeds.length || stopped
 				? [] : [["r", "reload", () => reload().catch(oops)]])
@@ -3490,6 +3527,13 @@ function build(w) {
 	safe(() => { if (w._riffleKey) doc.removeEventListener("keydown", w._riffleKey); });
 	const keyHandler = (e) => {
 		if (panel || menu) return; // the panel or feed picker handled it
+		// Typing in the end screen's note field is typing, not shortcuts. Enter
+		// and Esc still mean what they mean here — they leave the field first,
+		// then do it, and the note is already saved either way.
+		if (e.target === noteInput && noteInput) {
+			if (e.key !== "Enter" && e.key !== "Escape") return;
+			noteInput.blur();
+		}
 		if (e.metaKey || e.ctrlKey) {
 			if (e.key === "z") { e.preventDefault(); doUndo(); }
 			// The shortcut every reader tries first.
@@ -3527,6 +3571,7 @@ function build(w) {
 			case "ArrowRight": e.preventDefault(); openPanel(); break;
 			case "s": e.preventDefault(); doSkip(); break;
 			case "u": e.preventDefault(); doUndo(); break;
+			case "n": if (noteInput) { e.preventDefault(); noteInput.focus(); } break;
 			case "+": case "=": e.preventDefault(); setScale(fontScale + SIZE_STEP); break;
 			case "-": case "_": e.preventDefault(); setScale(fontScale - SIZE_STEP); break;
 			case "0": e.preventDefault(); setScale(1); break;
