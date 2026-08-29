@@ -1099,6 +1099,50 @@ function paintTag(node, color) {
 	node.style.color = "color-mix(in srgb, " + color + " 70%, CanvasText)";
 }
 
+// pdf.js, the copy Zotero ships with its reader. Loaded on the first page you
+// ask to see and kept: it is a megabyte of module, and a plugin you never press
+// p in should not pay for it.
+let pdfjs = null;
+const PDFJS_URL = "resource://zotero/reader/pdf/build/pdf.mjs";
+
+// Into the window's own global, not the system one: importESModule loads a
+// module beside Zotero's own code, where the built-in prototypes are frozen,
+// and pdf.js installs a polyfill on Map.prototype as it loads — "Map.prototype
+// is not extensible" and nothing renders. A module script in this document runs
+// in this window, where they are not.
+async function loadPDFJS() {
+	if (pdfjs) return pdfjs;
+	if (!win || win.closed) throw new Error("the window is gone");
+	const doc = win.document;
+	pdfjs = await new Promise((resolve, reject) => {
+		const done = (lib) => (lib && typeof lib.getDocument === "function"
+			? resolve(lib) : reject(new Error("Zotero's pdf.js is not where it used to be")));
+		const timer = win.setTimeout(() => reject(new Error("pdf.js did not load")), 15000);
+		win.addEventListener("riffle-pdfjs", () => {
+			win.clearTimeout(timer);
+			done(win._rifflePDFJS);
+		}, { once: true });
+		const tag = doc.createElement("script");
+		tag.type = "module";
+		// A module script cannot hand anything back, so it leaves the module on
+		// the window and says when it is there.
+		tag.textContent = 'import * as lib from "' + PDFJS_URL + '";'
+			+ 'window._rifflePDFJS = lib;'
+			+ 'window.dispatchEvent(new Event("riffle-pdfjs"));';
+		tag.addEventListener("error", () => {
+			win.clearTimeout(timer);
+			reject(new Error("pdf.js would not load"));
+		}, { once: true });
+		(doc.head || doc.documentElement).append(tag);
+	}).catch((e) => { pdfjs = null; throw e; });
+	// Its own worker, from the same place. Without this pdf.js goes looking for
+	// one relative to the document, which here is about:blank.
+	safe(() => {
+		pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_URL.replace("pdf.mjs", "pdf.worker.mjs");
+	});
+	return pdfjs;
+}
+
 // The file a card could show a page of, if it has one. getBestAttachment is
 // the same choice Zotero makes when you open an item from the items list, and
 // it is async, so the answer is remembered and the card redrawn when it lands.
@@ -1111,8 +1155,10 @@ function attachmentFor(item, redraw) {
 		return null;
 	}
 	safe(() => item.getBestAttachment().then((att) => {
-		attachments.set(item.id, att || null);
-		if (att && redraw) redraw();
+		// Only a PDF can be drawn as a page; anything else is opened with o.
+		const pdf = att && safe(() => att.attachmentContentType === "application/pdf", false);
+		attachments.set(item.id, pdf ? att : null);
+		if (pdf && redraw) redraw();
 	}).catch(oops));
 	return undefined; // not known yet; the card draws without it
 }
@@ -1380,21 +1426,21 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .ghost.out-left  { animation:outLeft .18s cubic-bezier(.35,0,.9,1) forwards; }
 .ghost.out-right { animation:outRight .18s cubic-bezier(.35,0,.9,1) forwards; }
 
-/* The file's first page, in the space the description would have had. Its own
- * frame rather than a picture of one: this is Zotero's reader, the same one the
- * item pane previews with. */
-.preview { position:relative; margin-top:.4rem; height:min(72vh, 820px);
-	border-radius:6px; overflow:hidden;
+/* The file's first page, in the space the description would have had, drawn
+ * onto a canvas by the pdf.js Zotero ships with its reader. */
+.preview { position:relative; margin-top:.4rem; min-height:12rem;
+	border-radius:6px; overflow:hidden; background:Canvas;
 	border:1px solid color-mix(in srgb, GrayText 30%, Canvas); }
-.preview iframe { position:absolute; inset:0; width:100%; height:100%;
-	border:none; opacity:0; transition:opacity .12s ease-out; }
-/* Only once the reader has drawn something: an empty frame flashing white in
- * the middle of a dark card is worse than the line it replaces. */
-.preview.ready iframe { opacity:1; }
+.preview canvas { display:block; width:100%; height:auto; opacity:0;
+	transition:opacity .12s ease-out; }
+/* Only once there is something on it: a blank white rectangle in the middle of
+ * a card is worse than the line it replaced. */
+.preview.ready canvas { opacity:1; }
 .preview .abs.empty { position:absolute; inset:0; display:flex;
 	align-items:center; justify-content:center; margin:0; }
 .preview.ready .abs.empty { display:none; }
-.preview.failed .abs.empty::after { content:" — it would not open"; }
+/* Whatever went wrong is written in the box itself, so it wraps. */
+.preview .abs.empty { padding:0 2rem; text-align:center; }
 
 /* 3. A long description that continues past the fold says so, instead of
  * looking exactly like one that has ended. */
@@ -1936,9 +1982,9 @@ function build(w) {
 	let busy = false;
 	let skipped = 0; // this session, for the count on the done screen
 	let ending = false; // showing the summary on the way out
-	let reader = null;  // the file preview on the card, when one is open
 	let previewAtt = 0; // the attachment it is for, so a late one can be dropped
 	let previewing = false; // p, and only for the card you pressed it on
+	let previewAll = false; // P: pages rather than descriptions, until told otherwise
 	const guard = (p) => {
 		busy = true;
 		return p.finally(() => { busy = false; });
@@ -1991,7 +2037,8 @@ function build(w) {
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
 			["n", "note", () => openPanel(manageJob("note", current()))],
 			["m", "move to", () => openPanel(manageJob("move", current()))],
-			["x", "trash", doTrash], ["p", "page", doPreview], ["u", "undo", doUndo],
+			["x", "trash", doTrash], ["p/P", "page", [doPreview, doPreviewAll]],
+			["u", "undo", doUndo],
 			["f", "collection", openFeeds], ["o", "open", openURL],
 			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
 				() => setScale(fontScale - SIZE_STEP)]],
@@ -2108,39 +2155,80 @@ function build(w) {
 	// Zotero's own reader, drawing the file's first page — the one the item pane
 	// previews with. A card at a time: the reader is torn down before the next
 	// card is drawn, so riffling never carries one along.
-	const dropReader = () => {
-		if (!reader) return;
-		safe(() => reader.uninit());
-		reader = null;
-	};
+	// The first page, drawn here rather than by the reader. Zotero ships pdf.js
+	// with its reader, so the page can go straight onto a canvas: no frame to
+	// wait on, no reader UI to hide again, and nothing to tear down when the
+	// card changes — a picture costs nothing to keep.
+	// The first page is a few hundred kilobytes of a file that can be a hundred
+	// megabytes, so the file is read in pieces rather than swallowed whole:
+	// pdf.js asks for the byte ranges it needs — the trailer, then the objects
+	// page one refers to — and each one is a read from disk of that much.
+	function rangeSource(pdf, path, length) {
+		const head = Math.min(length, 64 * 1024);
+		const source = new pdf.PDFDataRangeTransport(length, null);
+		source.requestDataRange = (begin, end) => {
+			IOUtils.read(path, { offset: begin, maxBytes: end - begin })
+				.then((bytes) => source.onDataRange(begin, bytes))
+				.catch(oops);
+		};
+		// The opening bytes go in without being asked for: pdf.js wants a
+		// header before it can want anything else.
+		IOUtils.read(path, { offset: 0, maxBytes: head })
+			.then((bytes) => source.onDataRange(0, bytes))
+			.catch(oops);
+		return source;
+	}
+
+	async function renderPage(att, canvas, width) {
+		const path = await att.getFilePathAsync();
+		if (!path) throw new Error("the file has not been downloaded");
+		const pdf = await loadPDFJS();
+		// Ranged where the platform can do it, whole where it cannot.
+		const size = typeof IOUtils !== "undefined"
+			&& await IOUtils.stat(path).then((st) => st.size).catch(() => 0);
+		const opts = size > 256 * 1024
+			? { range: rangeSource(pdf, path, size), isEvalSupported: false }
+			: {
+				data: typeof IOUtils !== "undefined"
+					? await IOUtils.read(path)
+					: new Uint8Array(await Zotero.File.getBinaryContentsAsync(path)
+						.then((str) => [...str].map((c) => c.charCodeAt(0)))),
+				isEvalSupported: false,
+			};
+		const file = await pdf.getDocument(opts).promise;
+		try {
+			const page = await file.getPage(1);
+			const unit = page.getViewport({ scale: 1 });
+			// Fit the card's column, then draw at the screen's own resolution so
+			// the type is as sharp as the rest of the card.
+			const scale = (width / unit.width) * (w.devicePixelRatio || 1);
+			const view = page.getViewport({ scale: Math.max(0.2, Math.min(6, scale)) });
+			canvas.width = Math.round(view.width);
+			canvas.height = Math.round(view.height);
+			await page.render({ canvasContext: canvas.getContext("2d"), viewport: view }).promise;
+		}
+		finally { safe(() => file.destroy()); }
+	}
 
 	function previewNode(att) {
 		const box = el(doc, "div", "preview");
-		box.append(el(doc, "div", "abs empty", "Opening the file…"));
-		const frame = doc.createElement("iframe");
-		frame.setAttribute("src", "resource://zotero/reader/reader.html");
-		frame.setAttribute("transparent", "transparent");
-		// The reader needs its own document before it can be started, and it
-		// needs tearing down again if you have moved on by the time it is.
-		frame.addEventListener("load", () => {
-			const mine = att.id;
-			safe(() => Zotero.Reader.openPreview(att.id, frame).then(async (r) => {
-				if (!frame.isConnected || previewAtt !== mine) return safe(() => r.uninit());
-				reader = r;
-				await r._open({});
-				box.classList.add("ready");
-			}).catch((e) => {
-				oops(e);
-				box.classList.add("failed");
-			}));
-		}, { once: true });
-		box.append(frame);
+		const note = el(doc, "div", "abs empty", "Drawing the first page…");
+		const canvas = doc.createElement("canvas");
+		box.append(canvas, note);
+		const mine = att.id;
+		// Not inside safe(): a failure here is what the box is for, and it says
+		// so on the card rather than only in the error console.
+		renderPage(att, canvas, Math.max(320, cardBox.clientWidth - 60)).then(() => {
+			if (previewAtt === mine) box.classList.add("ready");
+		}).catch((e) => {
+			oops(e);
+			note.textContent = "Could not draw the page: " + ((e && e.message) || String(e));
+		});
 		return box;
 	}
 
 	function draw() {
 		if (panel) { panel.remove(); panel = null; }
-		dropReader();
 		cardBox.className = "card " + dir;
 		cardBox.replaceChildren();
 		cardBox.scrollTop = 0;
@@ -2219,8 +2307,12 @@ function build(w) {
 
 		// The page of the file instead of the description: always when there is
 		// no description to show, and on p when there is.
+		// P says which of the two a card opens on; p is the other one, for the
+		// card you are looking at. With no description there is nothing to
+		// choose between.
 		const att = attachmentFor(item, render);
-		previewAtt = (att && (previewing || !body)) ? att.id : 0;
+		const wantPage = previewAll ? !previewing : previewing;
+		previewAtt = (att && (wantPage || !body)) ? att.id : 0;
 		if (previewAtt) cardBox.append(previewNode(att));
 		else if (body) cardBox.append(abstractNode(doc, body, item.getField("url")));
 		else if (att === undefined) cardBox.append(el(doc, "div", "abs empty", "Looking for a file…"));
@@ -2305,8 +2397,16 @@ function build(w) {
 		if (!item || busy) return;
 		const att = attachmentFor(item, render);
 		if (att === undefined) return flash("Still looking for a file…");
-		if (!att) return flash("No file on this item");
+		if (!att) return flash("No PDF on this item");
 		previewing = !previewing;
+		render();
+	};
+
+	// The same, for every card from here on.
+	const doPreviewAll = () => {
+		previewAll = !previewAll;
+		previewing = false;
+		flash(previewAll ? "Pages" : "Descriptions");
 		render();
 	};
 
@@ -2991,13 +3091,6 @@ function build(w) {
 	// handler per build and every copy fires — one arrow press would discard
 	// two items. Kept on the window rather than in this scope: after a
 	// reinstall the new sandbox still has to be able to unhook the old one.
-	// The reader holds listeners of its own, so it is torn down with the window
-	// as well as with the card. Hooked the same way as the key handler: after a
-	// reinstall the new sandbox still has to be able to unhook the old one.
-	safe(() => { if (w._riffleDrop) w.removeEventListener("unload", w._riffleDrop); });
-	w._riffleDrop = () => dropReader();
-	w.addEventListener("unload", w._riffleDrop);
-
 	safe(() => { if (w._riffleKey) doc.removeEventListener("keydown", w._riffleKey); });
 	const keyHandler = (e) => {
 		if (panel || menu) return; // the panel or feed picker handled it
@@ -3027,6 +3120,7 @@ function build(w) {
 				case "n": e.preventDefault(); return openPanel(manageJob("note", current()));
 				case "x": e.preventDefault(); return doTrash();
 				case "p": e.preventDefault(); return doPreview();
+				case "P": e.preventDefault(); return doPreviewAll();
 				case "s": e.preventDefault(); return;
 				default: break;
 			}

@@ -128,12 +128,16 @@ link when there is no file — which is every feed card, so nothing changes ther
 Tags Zotero has given a colour keep it, on the card and in the tag box, and come
 first in its order, the way they do in the items list.
 
-<kbd>p</kbd> shows the file's first page in place of the description, drawn by
-Zotero's own reader — the one the item pane previews with. An item with no
+<kbd>p</kbd> shows the PDF's first page in place of the description, drawn onto
+a canvas by the pdf.js Zotero ships with its reader — at the screen's own
+resolution, so the type is as sharp as the rest of the card. An item with no
 description shows it without being asked, since there is nothing else to read;
-otherwise the description stays and <kbd>p</kbd> is how you look at the page.
-It lasts for the card you pressed it on: the reader is torn down before the next
-card is drawn, so riffling never carries one along.
+otherwise the description stays and <kbd>p</kbd> is how you look at the page. It
+lasts for the card you pressed it on. <kbd>Shift</kbd>+<kbd>P</kbd> turns it the
+other way round for every card from there on — pages by default, and
+<kbd>p</kbd> is then how you look at the description of one. pdf.js is loaded the first time you ask
+for a page and not before: a plugin you never press <kbd>p</kbd> in should not
+pay for a megabyte of module.
 
 <kbd>f</kbd>, or the collection's name in the header, switches to another
 collection without leaving the window — the same picker feeds get, fuzzy-matching
