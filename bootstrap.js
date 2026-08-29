@@ -2171,43 +2171,64 @@ function build(w) {
 	// with its reader, so the page can go straight onto a canvas: no frame to
 	// wait on, no reader UI to hide again, and nothing to tear down when the
 	// card changes — a picture costs nothing to keep.
+	// The whole file, for a small one or where ranges are not on offer.
+	async function readWhole(path) {
+		if (typeof IOUtils !== "undefined") return IOUtils.read(path);
+		const str = await Zotero.File.getBinaryContentsAsync(path);
+		return new Uint8Array([...str].map((c) => c.charCodeAt(0)));
+	}
+
 	// The first page is a few hundred kilobytes of a file that can be a hundred
-	// megabytes, so the file is read in pieces rather than swallowed whole:
-	// pdf.js asks for the byte ranges it needs — the trailer, then the objects
-	// page one refers to — and each one is a read from disk of that much.
-	function rangeSource(pdf, path, length) {
-		const head = Math.min(length, 64 * 1024);
-		const source = new pdf.PDFDataRangeTransport(length, null);
+	// megabytes, so the file is read in pieces: pdf.js asks for the ranges it
+	// needs — the trailer, then the objects page one refers to — and each is a
+	// read from disk of that much. The opening bytes go in as the transport's
+	// own initial data, and it is told the stream is done, or pdf.js waits for
+	// more to arrive by itself and nothing ever draws.
+	async function rangeSource(pdf, path, length) {
+		const head = await IOUtils.read(path, { offset: 0, maxBytes: Math.min(length, 65536) });
+		const source = new pdf.PDFDataRangeTransport(length, head, true);
 		source.requestDataRange = (begin, end) => {
 			IOUtils.read(path, { offset: begin, maxBytes: end - begin })
 				.then((bytes) => source.onDataRange(begin, bytes))
-				.catch(oops);
+				.catch((e) => { oops(e); safe(() => source.abort()); });
 		};
-		// The opening bytes go in without being asked for: pdf.js wants a
-		// header before it can want anything else.
-		IOUtils.read(path, { offset: 0, maxBytes: head })
-			.then((bytes) => source.onDataRange(0, bytes))
-			.catch(oops);
 		return source;
+	}
+
+	// Ranges are an optimisation, so they are never the reason a page fails to
+	// appear: if one does not answer quickly the file is read whole instead.
+	async function openDoc(pdf, path, size) {
+		const whole = async () => pdf.getDocument({
+			data: await readWhole(path), isEvalSupported: false,
+		}).promise;
+		if (!(size > 256 * 1024) || typeof IOUtils === "undefined") return whole();
+		const task = pdf.getDocument({
+			range: await rangeSource(pdf, path, size), isEvalSupported: false,
+		});
+		let timer = null;
+		try {
+			return await Promise.race([
+				task.promise,
+				new Promise((_, no) => {
+					timer = w.setTimeout(() => no(new Error("ranged read timed out")), 6000);
+				}),
+			]);
+		}
+		catch (e) {
+			oops(e);
+			safe(() => task.destroy());
+			return whole();
+		}
+		finally { if (timer) w.clearTimeout(timer); }
 	}
 
 	async function renderPage(att, canvas, width) {
 		const path = await att.getFilePathAsync();
 		if (!path) throw new Error("the file has not been downloaded");
 		const pdf = await loadPDFJS();
-		// Ranged where the platform can do it, whole where it cannot.
 		const size = typeof IOUtils !== "undefined"
 			&& await IOUtils.stat(path).then((st) => st.size).catch(() => 0);
-		const opts = size > 256 * 1024
-			? { range: rangeSource(pdf, path, size), isEvalSupported: false }
-			: {
-				data: typeof IOUtils !== "undefined"
-					? await IOUtils.read(path)
-					: new Uint8Array(await Zotero.File.getBinaryContentsAsync(path)
-						.then((str) => [...str].map((c) => c.charCodeAt(0)))),
-				isEvalSupported: false,
-			};
-		const file = await pdf.getDocument(opts).promise;
+		const file = await openDoc(pdf, path, size);
 		try {
 			const page = await file.getPage(1);
 			const unit = page.getViewport({ scale: 1 });
@@ -2228,6 +2249,14 @@ function build(w) {
 		const canvas = doc.createElement("canvas");
 		box.append(canvas, note);
 		const mine = att.id;
+		// A page that never arrives should stop saying it is on its way: pdf.js
+		// can be waiting on something of its own, and "Drawing…" for ever reads
+		// as a plugin that has hung rather than a file that will not open.
+		const late = w.setTimeout(() => {
+			if (previewAtt === mine && !box.classList.contains("ready")) {
+				note.textContent = "This page is taking too long — o opens the file.";
+			}
+		}, 20000);
 		// Not inside safe(): a failure here is what the box is for, and it says
 		// so on the card rather than only in the error console.
 		renderPage(att, canvas, Math.max(320, cardBox.clientWidth - 60)).then(() => {
@@ -2235,7 +2264,7 @@ function build(w) {
 		}).catch((e) => {
 			oops(e);
 			note.textContent = "Could not draw the page: " + ((e && e.message) || String(e));
-		});
+		}).then(() => w.clearTimeout(late));
 		return box;
 	}
 
