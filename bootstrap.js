@@ -29,8 +29,13 @@ const CARD_PAD_REM = 2.2;
 // enough for the column plus the card's padding and a scrollbar at the default
 // font size; turn the font up and the column narrows inside this frame rather
 // than the furniture moving. Nothing here depends on the item being shown.
-const WIN_W = 600;
+const WIN_W = 640;
 const WIN_H = 760;
+// A collection deck answers to more keys and can show a page, so its window
+// starts wider: the hint bar is what sets the floor, and it is measured rather
+// than guessed — every key on one line at the reading size.
+const COLL_W = 810;
+const COLL_H = 860;
 const SIZE_MIN = 0.7, SIZE_MAX = 2.4, SIZE_STEP = 0.08;
 const AHEAD = 25;   // items hydrated ahead of the cursor
 const BEHIND = 50;  // and kept behind it, so undo does not have to refetch
@@ -739,7 +744,7 @@ function splitTags(text) {
 
 // --- prefs -----------------------------------------------------------------
 
-let geometry = null;
+let geometry = { feed: null, collection: null }; // remembered per deck
 
 function loadScale() {
 	const v = parseFloat(Zotero.Prefs.get(SIZE_PREF));
@@ -764,15 +769,19 @@ function applyFontSize(w) {
 
 function loadState() {
 	const was = safe(() => JSON.parse(Zotero.Prefs.get(STATE_PREF) || "null"), null);
-	if (was && was.geometry) geometry = was.geometry;
+	if (!was) return;
+	// One deck, one geometry, is what the pref used to hold.
+	if (was.geometry && was.geometry.w) geometry.feed = was.geometry;
+	if (was.feed) geometry.feed = was.feed;
+	if (was.collection) geometry.collection = was.collection;
 }
 
 function saveState(w) {
 	safe(() => {
 		if (w && !w.closed && w.outerWidth > 200) {
-			geometry = { w: w.outerWidth, h: w.outerHeight, x: w.screenX, y: w.screenY };
+			geometry[mode] = { w: w.outerWidth, h: w.outerHeight, x: w.screenX, y: w.screenY };
 		}
-		Zotero.Prefs.set(STATE_PREF, JSON.stringify({ geometry }));
+		Zotero.Prefs.set(STATE_PREF, JSON.stringify(geometry));
 	});
 }
 
@@ -780,13 +789,15 @@ function saveState(w) {
 // Always WIN_W by WIN_H, shrunk only if the display is smaller than that.
 function defaultSize(main) {
 	const screen = safe(() => main.screen, null);
-	const availW = (screen && screen.availWidth) || WIN_W;
-	const availH = (screen && screen.availHeight) || WIN_H;
-	return { w: Math.min(WIN_W, availW - 40), h: Math.min(WIN_H, availH - 60) };
+	const wide = isFeedMode() ? WIN_W : COLL_W;
+	const tall = isFeedMode() ? WIN_H : COLL_H;
+	const availW = (screen && screen.availWidth) || wide;
+	const availH = (screen && screen.availHeight) || tall;
+	return { w: Math.min(wide, availW - 40), h: Math.min(tall, availH - 60) };
 }
 
 function features(main) {
-	const g = geometry;
+	const g = geometry[mode];
 	if (!g || !(g.w > 200) || !(g.h > 200)) {
 		const d = defaultSize(main);
 		return `chrome,centerscreen,resizable,scrollbars,width=${d.w},height=${d.h}`;
@@ -2025,23 +2036,25 @@ function build(w) {
 
 	// The numbers file into recent collections without the panel; clicking that
 	// hint opens the panel, which is where those same collections are listed.
-	// What fits on one line at the window's own width, which is the width of the
-	// text column and nothing more. Both bars ran onto a second line, and a hint
-	// bar that wraps reads as an accident. So the keys every window shares and
-	// the reader already knows — +/− for size, and on a collection deck f and o,
-	// which its header and the README carry — give up their place to the ones
-	// that act on the card in front of you.
+	// Every key the card answers to, on one line — which is what the window is
+	// sized to hold rather than the other way round.
 	const cardHints = () => hint(isFeedMode()
 		? [["←", "discard", doDiscard], ["→", "keep", () => openPanel()],
 			["s", "skip", doSkip], ["u", "undo", doUndo],
 			["1–9", "recent", () => openPanel()], ["f", "feed", openFeeds],
-			["o", "open", openURL], ["Esc", "close", stop]]
+			["o", "open", openURL],
+			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
+				() => setScale(fontScale - SIZE_STEP)]],
+			["Esc", "close", stop]]
 		: [["←/→", "browse", [prev, next]],
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
 			["n", "note", () => openPanel(manageJob("note", current()))],
 			["m", "move", () => openPanel(manageJob("move", current()))],
 			["x", "trash", doTrash], ["p/P", "page", [doPreview, doPreviewAll]],
-			["u", "undo", doUndo], ["Esc", "close", stop]]);
+			["u", "undo", doUndo], ["f", "switch", openFeeds], ["o", "open", openURL],
+			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
+				() => setScale(fontScale - SIZE_STEP)]],
+			["Esc", "close", stop]]);
 
 	// --- the card ---------------------------------------------------------
 

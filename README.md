@@ -139,10 +139,6 @@ other way round for every card from there on — pages by default, and
 for a page and not before: a plugin you never press <kbd>p</kbd> in should not
 pay for a megabyte of module.
 
-The bar along the bottom lists the keys that act on the card in front of you;
-<kbd>+</kbd>/<kbd>−</kbd>, <kbd>f</kbd> and <kbd>o</kbd> work there too, and are
-left off it so that it fits on one line at the window's own width.
-
 <kbd>f</kbd>, or the collection's name in the header, switches to another
 collection without leaving the window — the same picker feeds get, fuzzy-matching
 the full path and carrying each collection's item count.
@@ -223,10 +219,12 @@ prose, the math and the chrome together rather than drifting apart.
 **Prose is set as prose:** `--` becomes an en dash, `` ``quoted'' `` becomes
 curly quotes, and text is held to a readable measure — about 34rem, near the 75
 characters past which the eye starts losing the next line. The window opens at a
-fixed 600×760, chosen to fit that column with no dead margin, and stays that
-shape whatever the item or the font size. Resize it and the size is remembered;
-widen it past the column and the text centres rather than hugging the left edge,
-the way a reader should. Descriptions are set in a serif, which is what
+fixed size and stays that shape whatever the item or the font size: 640×760 for
+a feed deck and 810×860 for a collection one, each being what its hint bar needs
+to list every key on one line — measured, not guessed. Resize it and the size is
+remembered, per deck, since the two are not asking for the same window; widen it
+past the column and the text centres rather than hugging the left edge, the way
+a reader should. Descriptions are set in a serif, which is what
 long-form reading wants and what sits with KaTeX's Computer Modern — a sans body
 beside serif formulas reads as two documents stapled together. The chrome stays
 in the system UI font, because it is UI. Hyphenation is on, using the item's own
