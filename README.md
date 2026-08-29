@@ -139,6 +139,10 @@ other way round for every card from there on — pages by default, and
 for a page and not before: a plugin you never press <kbd>p</kbd> in should not
 pay for a megabyte of module.
 
+The bar along the bottom lists the keys that act on the card in front of you;
+<kbd>+</kbd>/<kbd>−</kbd>, <kbd>f</kbd> and <kbd>o</kbd> work there too, and are
+left off it so that it fits on one line at the window's own width.
+
 <kbd>f</kbd>, or the collection's name in the header, switches to another
 collection without leaving the window — the same picker feeds get, fuzzy-matching
 the full path and carrying each collection's item count.

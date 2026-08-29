@@ -1473,7 +1473,7 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	border:1px solid color-mix(in srgb, GrayText 35%, Canvas); }
 
 .bar { border-top:1px solid color-mix(in srgb, GrayText 35%, Canvas);
-	padding:.5rem 1.1rem; display:flex; flex-wrap:wrap; gap:.35rem 1rem;
+	padding:.5rem 1.1rem; display:flex; flex-wrap:wrap; gap:.35rem .65rem;
 	font-size:.75rem; color:GrayText; }
 .bar kbd { font:.72rem ui-monospace, monospace; padding:.05em .4em; border-radius:4px;
 	border:1px solid color-mix(in srgb, GrayText 45%, Canvas);
@@ -2025,24 +2025,23 @@ function build(w) {
 
 	// The numbers file into recent collections without the panel; clicking that
 	// hint opens the panel, which is where those same collections are listed.
+	// What fits on one line at the window's own width, which is the width of the
+	// text column and nothing more. Both bars ran onto a second line, and a hint
+	// bar that wraps reads as an accident. So the keys every window shares and
+	// the reader already knows — +/− for size, and on a collection deck f and o,
+	// which its header and the README carry — give up their place to the ones
+	// that act on the card in front of you.
 	const cardHints = () => hint(isFeedMode()
 		? [["←", "discard", doDiscard], ["→", "keep", () => openPanel()],
 			["s", "skip", doSkip], ["u", "undo", doUndo],
 			["1–9", "recent", () => openPanel()], ["f", "feed", openFeeds],
-			["o", "open", openURL],
-			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
-				() => setScale(fontScale - SIZE_STEP)]],
-			["Esc", "close", stop]]
-		: [["←/→", "move through", [prev, next]],
+			["o", "open", openURL], ["Esc", "close", stop]]
+		: [["←/→", "browse", [prev, next]],
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
 			["n", "note", () => openPanel(manageJob("note", current()))],
-			["m", "move to", () => openPanel(manageJob("move", current()))],
+			["m", "move", () => openPanel(manageJob("move", current()))],
 			["x", "trash", doTrash], ["p/P", "page", [doPreview, doPreviewAll]],
-			["u", "undo", doUndo],
-			["f", "collection", openFeeds], ["o", "open", openURL],
-			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
-				() => setScale(fontScale - SIZE_STEP)]],
-			["Esc", "close", stop]]);
+			["u", "undo", doUndo], ["Esc", "close", stop]]);
 
 	// --- the card ---------------------------------------------------------
 
