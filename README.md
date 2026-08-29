@@ -174,6 +174,20 @@ advertises its PDF, so no DOI is needed), in the background, after the card has
 already flicked away. For the handful of papers that deserve full metadata,
 Zotero's own *Add to My Library* is still right there.
 
+## Reading time
+
+If [Reading Time](https://github.com/ievlevpn/zotero-time-tracking) is
+installed, the finish screen offers once — and only once — to keep the sitting.
+Say yes and every later sitting is logged too, as a single *Feed reading* row
+per window rather than seconds scattered over items you mostly discarded. The
+clock is this plugin's own, so it stops counting after five idle minutes on a
+card. Riffling a collection is not logged: those items have their own reading
+time already.
+
+The answer lives in `extensions.zotero.feedRiffle.readingTime`; clear it in the
+config editor to be asked again. Without Reading Time installed nothing here
+appears, and nothing changes.
+
 ## Reading what the feeds actually send
 
 Feed metadata arrives raw and no two sources format it the same way, so the card

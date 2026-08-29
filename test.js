@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, noteHTML } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, noteHTML, bankTime, stat, statReset } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -224,7 +224,7 @@ assert.strictEqual(mark("\\tag{1}x"), "$$\\tag{1}x$$", "\\tag is display-only to
 assert.strictEqual(mark("$x$"), "$x$", "content that already has delimiters is left alone");
 assert.strictEqual(mark("   "), "   ", "blank content is left alone");
 
-console.log("ok");
+
 
 // --- foldLibraryRows: the library index the "in library" badge and the ------
 // filing panel both read. One row per (item, value, collection).
@@ -337,3 +337,42 @@ assert.strictEqual(seenLine(6, 24, 18), "6 of 24 seen, 18 still to look at.");
 assert.strictEqual(seenLine(0, 0, 0), "Nothing here.");
 assert.strictEqual(noteHTML("one\ntwo <b> & three"),
 	"<p>one</p><p>two &lt;b&gt; &amp; three</p>", "a typed note is text, never markup");
+
+// --- banking the sitting into Reading Time ---------------------------------
+// The other plugin is optional: absent, declined, or unanswered all mean the
+// same thing here — write nothing, say nothing.
+const banked = [];
+let answer;
+global.Zotero = {
+	logError: (e) => { throw e; },
+	Prefs: { get: (k) => (k === "feedRiffle.readingTime" ? answer : undefined), set: () => {} },
+};
+const withAPI = (v) => {
+	global.Zotero.ReadingTime = v;
+	statReset();
+	stat.spent = 900000;   // 15 minutes counted
+	stat.last = 0;         // and no card on screen, so statTick() adds nothing
+	bankTime();
+};
+const real = { apiVersion: 1, addFeedSession: (s, at) => (banked.push([s, at]), true) };
+
+answer = undefined;
+withAPI(real);
+assert.strictEqual(banked.length, 0, "nothing is logged before the question is answered");
+answer = false;
+withAPI(real);
+assert.strictEqual(banked.length, 0, "and nothing after it is declined");
+
+answer = true;
+withAPI(undefined);
+assert.strictEqual(banked.length, 0, "Reading Time not installed: no error, no row");
+withAPI({ apiVersion: 2, addFeedSession: () => true });
+assert.strictEqual(banked.length, 0, "nor for an API we do not know how to call");
+
+withAPI(real);
+assert.deepStrictEqual(banked, [[900, stat.began]], "accepted: one row, in seconds, from when it began");
+assert.ok(stat.banked, "and it is not written twice");
+bankTime();
+assert.strictEqual(banked.length, 1);
+
+console.log("ok");

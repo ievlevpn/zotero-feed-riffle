@@ -18,6 +18,7 @@ const STATE_PREF = "feedRiffle.state";         // window geometry
 const SIZE_PREF = "feedRiffle.fontScale";      // your own +/- adjustment
 const RECENT_PREF = "feedRiffle.recentCollections"; // most recently filed into
 const STATS_PREF = "feedRiffle.summary";       // false: the finish summary stays off
+const RT_PREF = "feedRiffle.readingTime";      // unset: ask once; then true or false
 const RECENT_MAX = 9; // as many as there are number keys
 const BASE_PX = 15;   // reading size at scale 1, before Zotero's own setting
 // The text column, and the card's side padding, in rem. The stylesheet and the
@@ -81,10 +82,11 @@ const IDLE_CAP = 5 * 60 * 1000;
 
 // The sitting, not the deck: opening the window resets these, moving on to the
 // next feed does not, so the summary covers everything you just did.
-const stat = { kept: 0, dropped: 0, skipped: 0, spent: 0, last: 0 };
+const stat = { kept: 0, dropped: 0, skipped: 0, spent: 0, last: 0, began: 0, banked: false };
 
 function statReset() {
-	Object.assign(stat, { kept: 0, dropped: 0, skipped: 0, spent: 0, last: Date.now() });
+	const now = Date.now();
+	Object.assign(stat, { kept: 0, dropped: 0, skipped: 0, spent: 0, last: now, began: now, banked: false });
 }
 
 // Called as each card leaves: the time it was on screen is time spent reading.
@@ -95,6 +97,35 @@ function statTick() {
 }
 
 const summaryOn = () => safe(() => Zotero.Prefs.get(STATS_PREF) !== false, true);
+
+// --- Reading Time ----------------------------------------------------------
+//
+// Reading Time is a separate plugin. If it is installed it publishes an object
+// on Zotero, which is withdrawn again when it shuts down — so this looks it up
+// at the moment of use rather than caching it: anything held onto could be a
+// function whose scope has since been deleted. Not finding it is normal, and
+// nothing here changes when it isn't there.
+const readingTime = () => safe(() => {
+	const api = Zotero.ReadingTime;
+	return api && api.apiVersion === 1 && typeof api.addFeedSession === "function" ? api : null;
+}, null);
+
+// undefined until asked, then true or false, and never asked again either way.
+const rtAnswer = () => safe(() => Zotero.Prefs.get(RT_PREF), undefined);
+
+// One row for the whole sitting, banked as the window closes. Per-item seconds
+// would be a fiction: most of a deck is items you discarded, and the ones you
+// kept were read before they had somewhere to be filed. The deck's own clock is
+// also the honest one — it stops counting after five idle minutes on a card,
+// which a clock ticking in the other plugin has no way to know to do.
+function bankTime() {
+	if (!isFeedMode() || stat.banked || rtAnswer() !== true) return;
+	statTick();
+	const api = readingTime();
+	if (api && api.addFeedSession(Math.round(stat.spent / 1000), stat.began)) {
+		stat.banked = true;
+	}
+}
 
 function safe(fn, fallback) {
 	try { return fn(); }
@@ -1504,6 +1535,7 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	font-size:.72rem; padding:.1rem .3rem; border-radius:4px;
 	color:color-mix(in srgb, GrayText 55%, Canvas); }
 .quiet:hover { color:GrayText; background:color-mix(in srgb, GrayText 12%, Canvas); }
+.asks { display:flex; gap:.2rem; }
 /* The message around it is grey because it is a message. This is a list you
  * pick from with the arrows, the same one the feed picker shows, so it reads in
  * ordinary text rather than looking switched off. */
@@ -1796,7 +1828,7 @@ function openWindow() {
 	// too, when the real one loads — nulling `win` from it killed the load.
 	// Parked on the window so a later install can unhook this one.
 	safe(() => { if (win._riffleUnload) win.removeEventListener("unload", win._riffleUnload); });
-	win._riffleUnload = () => safe(() => saveState(win));
+	win._riffleUnload = () => safe(() => { saveState(win); bankTime(); });
 	win.addEventListener("unload", win._riffleUnload);
 	const go = () => reload().catch(oops);
 	if (win.document.readyState === "complete") go();
@@ -2131,6 +2163,30 @@ function build(w) {
 		return box;
 	}
 
+	// Asked once, the first time a sitting ends with something worth logging and
+	// Reading Time is there to log it to. Either answer is remembered, so this
+	// is a question you see once and then never again.
+	function askBox() {
+		if (!isFeedMode() || rtAnswer() !== undefined || !readingTime()) return null;
+		statTick();
+		if (stat.spent < 60000) return null;
+		const box = el(doc, "div", "sum");
+		box.append(el(doc, "div", "figures", `Keep ${fmtSpan(stat.spent)} in Reading Time?`));
+		const answer = (label, on) => {
+			const b = el(doc, "button", "quiet", label);
+			b.addEventListener("mousedown", (e) => {
+				e.preventDefault();
+				safe(() => Zotero.Prefs.set(RT_PREF, on));
+				render();
+			});
+			return b;
+		};
+		const row = el(doc, "div", "asks");
+		row.append(answer("Yes, and from now on", true), answer("No", false));
+		box.append(row);
+		return box;
+	}
+
 	// Where riffling ends. `stopped` only says how you got here: by pressing Esc
 	// on a card, rather than by running the deck out.
 	function endScreen(stopped) {
@@ -2146,6 +2202,9 @@ function build(w) {
 
 		const sum = summaryBox(stopped);
 		if (sum) done.append(sum);
+
+		const ask = askBox();
+		if (ask) done.append(ask);
 
 		// Reaching the end of one feed is the moment you are most likely to want
 		// another, so the ones still waiting are offered here rather than left
@@ -3332,5 +3391,5 @@ if (typeof module !== "undefined") {
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine,
-		noteHTML };
+		noteHTML, bankTime, stat, statReset };
 }
