@@ -2088,9 +2088,12 @@ function build(w) {
 	let previewAll = false; // P: pages rather than descriptions, until told otherwise
 	let noteAll = false;    // N: the notes stay open and follow the deck
 	let shutPanel = null;   // closes whatever panel is open, from outside it
+	let followID = null;    // the card the open panel is following, under N
 	const guard = (p) => {
 		busy = true;
-		return p.finally(() => { busy = false; });
+		// A write redraws the card while it is still in flight, so the notes
+		// cannot come back until it has landed. Here is where it has landed.
+		return p.finally(() => { busy = false; noteFollow(); });
 	};
 
 	const flash = (text) => {
@@ -2389,7 +2392,17 @@ function build(w) {
 	}
 
 	function draw() {
-		if (panel) { panel.remove(); panel = null; }
+		// A panel you opened belongs to the card you opened it on, so a new card
+		// takes it away. The one N keeps open belongs to the card itself — and
+		// the same card is drawn twice, since the file it has is looked for in
+		// the background and redraws the card when it turns up. Taking it away
+		// there cost a note half-typed, and put the notes back a beat later.
+		if (panel && !(followID && followID === ids[cursor])) {
+			panel.remove();
+			panel = null;
+			shutPanel = null;
+			followID = null;
+		}
 		cardBox.className = "card " + dir;
 		cardBox.replaceChildren();
 		cardBox.scrollTop = 0;
@@ -2501,9 +2514,12 @@ function build(w) {
 			cardBox.append(a);
 		}
 
-		cardHints();
+		// The bar belongs to whatever is in front: a panel kept across the redraw
+		// still owns it, and its own hints are already there.
+		if (!panel) cardHints();
 		paintFade();
 		hydrate(cursor).catch(oops);
+		noteFollow();
 	}
 
 	// --- moving through the deck ------------------------------------------
@@ -2544,13 +2560,11 @@ function build(w) {
 		previewing = false;
 		cursor--;
 		render();
-		noteFollow();
 	};
 	const next = () => {
 		if (busy || cursor >= ids.length) return;
 		statTick();
 		advance();
-		noteFollow();
 	};
 
 	// The file's first page, for the card you are on. It goes back to the
@@ -2797,25 +2811,27 @@ function build(w) {
 	// refuse the panel: writing a new one still works.
 	function openNotes(browse) {
 		const item = current();
+		const at = ids[cursor];
 		if (!item || panel || busy) return;
 		itemNotes(item)
 			.catch((e) => { oops(e); return []; })
 			.then((notes) => {
 				// The deck may have moved on while they were being read.
-				if (panel || current() !== item) return;
+				if (panel || ids[cursor] !== at) return;
 				const job = manageJob("note", item, notes);
 				// Opened for you rather than asked for: an item with nothing to
 				// read says so, instead of dropping you in the box — where the
 				// arrows would be typing rather than turning cards.
 				job.browse = !!browse;
 				openPanel(job);
+				if (panel && browse) followID = at;
 			});
 	}
 
 	// With N on, the notes follow the deck instead of being asked for card by
 	// card. Not on the way out: the finish screen is not a card.
 	const noteFollow = () => {
-		if (noteAll && !panel && !busy && !ending && cursor < ids.length) openNotes(true);
+		if (noteAll && !panel && !ending && cursor < ids.length) openNotes(true);
 	};
 
 	function openPanel(job) {
@@ -3282,6 +3298,7 @@ function build(w) {
 		const closePanel = () => {
 			if (!panel) return;
 			shutPanel = null;
+			followID = null;
 			panel.remove();
 			panel = null;
 			cardHints();
