@@ -36,7 +36,8 @@ const WIN_H = 760;
 // starts wider: the hint bar is what sets the floor, and it is measured rather
 // than guessed — every key on one line at the reading size. The column of text
 // stays the same measure inside it, centred.
-const COLL_W = 930;
+const COLL_W = 960;
+const OLD_COLL_W = [810, 930];  // defaults from before the bar grew
 const COLL_H = 860;
 const SIZE_MIN = 0.7, SIZE_MAX = 2.4, SIZE_STEP = 0.08;
 const AHEAD = 25;   // items hydrated ahead of the cursor
@@ -810,6 +811,12 @@ function loadState() {
 	if (was.geometry && was.geometry.w) geometry.feed = was.geometry;
 	if (was.feed) geometry.feed = was.feed;
 	if (was.collection) geometry.collection = was.collection;
+	// A width that is only what the default used to be was nobody's choice, and
+	// the hint bar has grown a key since — it would wrap in it. Widths anyone
+	// actually dragged to are left alone.
+	if (geometry.collection && OLD_COLL_W.includes(geometry.collection.w)) {
+		geometry.collection = null;
+	}
 }
 
 function saveState(w) {
@@ -1597,6 +1604,7 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	border:1px solid color-mix(in srgb, GrayText 45%, Canvas); }
 .notebody:focus { outline:none; border-color:Highlight;
 	box-shadow:0 0 0 2px color-mix(in srgb, Highlight 30%, transparent); }
+.notebody .empty { color:GrayText; font-style:italic; }
 .notebody > :first-child { margin-top:0; }
 .notebody > :last-child { margin-bottom:0; }
 .row input:focus, .row textarea:focus { outline:none; border-color:Highlight;
@@ -2078,6 +2086,8 @@ function build(w) {
 	let previewAtt = 0; // the attachment it is for, so a late one can be dropped
 	let previewing = false; // p, and only for the card you pressed it on
 	let previewAll = false; // P: pages rather than descriptions, until told otherwise
+	let noteAll = false;    // N: the notes stay open and follow the deck
+	let shutPanel = null;   // closes whatever panel is open, from outside it
 	const guard = (p) => {
 		busy = true;
 		return p.finally(() => { busy = false; });
@@ -2130,7 +2140,7 @@ function build(w) {
 			["Esc", "close", stop]]
 		: [["←/→", "browse", [prev, next]],
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
-			["n", "note", () => openNotes()],
+			["n/N", "notes", [() => openNotes(), doNoteAll]],
 			["m", "move", () => openPanel(manageJob("move", current()))],
 			["x", "trash", doTrash], ["p/P", "page", [doPreview, doPreviewAll]],
 			["u", "undo", doUndo], ["s", "subcollections", doDeep],
@@ -2534,11 +2544,13 @@ function build(w) {
 		previewing = false;
 		cursor--;
 		render();
+		noteFollow();
 	};
 	const next = () => {
 		if (busy || cursor >= ids.length) return;
 		statTick();
 		advance();
+		noteFollow();
 	};
 
 	// The file's first page, for the card you are on. It goes back to the
@@ -2561,6 +2573,16 @@ function build(w) {
 		deep = !deep;
 		flash(deep ? "With subcollections" : "This collection only");
 		reload().catch(oops);
+	};
+
+	// The same, for every card from here on: the notes are open as each card
+	// arrives, and the arrows turn cards rather than walking the notes.
+	const doNoteAll = () => {
+		if (busy) return;
+		noteAll = !noteAll;
+		flash(noteAll ? "Notes stay open" : "Notes when asked for");
+		if (noteAll) noteFollow();
+		else if (panel && shutPanel) shutPanel();
 	};
 
 	// The same, for every card from here on.
@@ -2773,13 +2795,28 @@ function build(w) {
 	// Reading the notes is a database trip, so the panel opens after it rather
 	// than filling in behind your back. Failing to read them is not a reason to
 	// refuse the panel: writing a new one still works.
-	function openNotes() {
+	function openNotes(browse) {
 		const item = current();
 		if (!item || panel || busy) return;
 		itemNotes(item)
 			.catch((e) => { oops(e); return []; })
-			.then((notes) => { if (!panel) openPanel(manageJob("note", item, notes)); });
+			.then((notes) => {
+				// The deck may have moved on while they were being read.
+				if (panel || current() !== item) return;
+				const job = manageJob("note", item, notes);
+				// Opened for you rather than asked for: an item with nothing to
+				// read says so, instead of dropping you in the box — where the
+				// arrows would be typing rather than turning cards.
+				job.browse = !!browse;
+				openPanel(job);
+			});
 	}
+
+	// With N on, the notes follow the deck instead of being asked for card by
+	// card. Not on the way out: the finish screen is not a card.
+	const noteFollow = () => {
+		if (noteAll && !panel && !busy && !ending && cursor < ids.length) openNotes(true);
+	};
 
 	function openPanel(job) {
 		const item = current();
@@ -3093,7 +3130,12 @@ function build(w) {
 		// last one is the empty box: writing a note is somewhere you go, not
 		// where the panel drops you.
 		const notes = job.notes || [];
-		let nSel = Math.max(0, notes.length - 1);   // the last one, or the box
+		// Which note is on screen, unless `writing` — the empty box past the end
+		// of them. A panel you asked for with nothing to read starts in the box;
+		// one that opened by itself starts on the reading side and says so, so
+		// that the arrows keep turning cards.
+		let nSel = Math.max(0, notes.length - 1);
+		let writing = !notes.length && !job.browse;
 		const nRow = el(doc, "div", "row");
 		nRow.style.display = "none";
 		nRow.append(el(doc, "label", null, "Note"));
@@ -3111,14 +3153,18 @@ function build(w) {
 		panel.append(nRow);
 		panel.addEventListener("click", openLinks);
 
-		const onNote = () => notes[nSel] || null;
+		const onNote = () => (writing ? null : notes[nSel] || null);
 
 		const paintNotes = () => {
 			const on = onNote();
-			nHead.style.display = notes.length ? "" : "none";
-			nBody.style.display = on ? "" : "none";
-			nIn.style.display = on ? "none" : "";
-			if (on) {
+			nHead.style.display = notes.length || !writing ? "" : "none";
+			nBody.style.display = writing ? "none" : "";
+			nIn.style.display = writing ? "" : "none";
+			if (!notes.length && !writing) {
+				nHead.textContent = "No notes";
+				nBody.replaceChildren(el(doc, "div", "empty", "Nothing written about this one yet."));
+			}
+			else if (on) {
 				const when = safe(() => Zotero.Date.sqlToDate(on.dateModified, true)
 					.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }), "");
 				nHead.textContent = `${nSel + 1} of ${notes.length}${when ? " · " + when : ""}`;
@@ -3132,15 +3178,31 @@ function build(w) {
 			else if (notes.length) nHead.textContent = "New note";
 		};
 
+		const toBox = () => {
+			if (writing) return;
+			writing = true;
+			paintNotes();
+			nIn.focus();
+			panelHints();
+		};
+
 		// Down off the last note is the box; up out of the box is the last note,
 		// but only from the very start of it — anywhere else the arrows are
 		// editing the text you are typing.
 		const walkNotes = (d) => {
-			const next = Math.max(0, Math.min(notes.length, nSel + d));
-			if (next === nSel) return;
-			nSel = next;
+			if (writing) {
+				if (d > 0) return;
+				writing = false;
+				nSel = Math.max(0, notes.length - 1);
+			}
+			else if (d > 0) {
+				if (nSel + 1 < notes.length) nSel++;
+				else return toBox();
+			}
+			else if (!nSel) return;
+			else nSel--;
 			paintNotes();
-			(onNote() ? nBody : nIn).focus();
+			(writing ? nIn : nBody).focus();
 			panelHints();
 		};
 
@@ -3176,14 +3238,15 @@ function build(w) {
 					.concat(typed || job.only ? [] : [["⇥", "add note", () => setStage(2)]])
 					.concat(job.only ? [] : [["⇧⇥", "back", () => setStage(0)]])
 					.concat([["Esc", "cancel", back]]));
-			} else if (onNote()) {
-				hint([["↑↓", "browse", () => walkNotes(1)],
-					["⏎", "new note", () => walkNotes(notes.length - nSel)],
-					["Esc", "back", back]]);
+			} else if (!writing) {
+				hint((noteAll ? [["←/→", "cards", [() => turnCard(-1), () => turnCard(1)]]] : [])
+					.concat(notes.length > 1 ? [["↑↓", "browse", () => walkNotes(1)]] : [])
+					.concat([["⏎", "new note", toBox], ["Esc", "back", back]]));
 			} else {
 				// Nothing to click about a modifier: ⇧⏎ describes the key alone.
 				hint([["⏎", done, () => commit()], ["⇧⏎", "newline"]]
-					.concat(notes.length ? [["↑", "notes", () => walkNotes(-1)]] : [])
+					.concat(notes.length || job.browse || noteAll
+						? [["↑", "notes", () => walkNotes(-1)]] : [])
 					.concat(job.only ? [] : [["⇧⇥", "back", () => setStage(1)]])
 					.concat([["Esc", "cancel", back]]));
 			}
@@ -3198,7 +3261,7 @@ function build(w) {
 			tRow.style.display = (job.only ? stage === 1 : reach >= 1) ? "" : "none";
 			nRow.style.display = (job.only ? stage === 2 : reach >= 2) ? "" : "none";
 			cDrop.style.display = stage === 0 ? "" : "none";
-			(stage === 0 ? cIn : stage === 1 ? tIn : onNote() ? nBody : nIn).focus();
+			(stage === 0 ? cIn : stage === 1 ? tIn : writing ? nIn : nBody).focus();
 			panelHints();
 		};
 		// Clicking straight into a box is the same as tabbing to it.
@@ -3211,8 +3274,14 @@ function build(w) {
 				if (box === cIn) cIn.select();
 			}));
 
+		const turnCard = (d) => {
+			closePanel();
+			return d < 0 ? prev() : next();
+		};
+
 		const closePanel = () => {
 			if (!panel) return;
+			shutPanel = null;
 			panel.remove();
 			panel = null;
 			cardHints();
@@ -3253,6 +3322,20 @@ function build(w) {
 				if (stage === 1 && tIn.value.trim()) return takeTag();
 				return setStage(stage + 1);
 			}
+			// The panel is where N lives while it is on: there is no bare card to
+			// press it on. Only from the reading side — in the box it is a letter.
+			if (stage === 2 && !writing && e.key === "N") {
+				e.preventDefault(); e.stopPropagation();
+				return doNoteAll();
+			}
+			// With N on the panel is not something you opened, it is what the
+			// window looks like — so the arrows go on meaning what they mean on
+			// a card, and the notes come back on the one you land on.
+			if (stage === 2 && !writing && noteAll
+				&& (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+				e.preventDefault(); e.stopPropagation();
+				return turnCard(e.key === "ArrowLeft" ? -1 : 1);
+			}
 			// Only with the box empty: with anything in it, these are editing.
 			if (stage === 1 && !tIn.value && tags.length) {
 				if (e.key === "Backspace" || (e.key === "Delete" && armed >= 0)) {
@@ -3271,8 +3354,8 @@ function build(w) {
 				// suggestion if there is one — and Shift+Enter takes the words as
 				// typed instead. An empty box means you are done tagging.
 				if (stage === 1 && tIn.value.trim()) return takeTag(e.shiftKey);
-				// Reading a note, not writing one: Enter is the way to the box.
-				if (onNote()) return walkNotes(notes.length - nSel);
+				// Reading, not writing: Enter is the way to the box.
+				if (stage === 2 && !writing) return toBox();
 				return commit();
 			}
 			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -3288,8 +3371,8 @@ function build(w) {
 					tSel = (tSel + d + tShown.length) % tShown.length;
 					return paintTagDrop();
 				}
-				if (stage === 2 && notes.length
-					&& (onNote() || (d < 0 && !nIn.selectionStart && !nIn.selectionEnd))) {
+				if (stage === 2 && (notes.length || job.browse || noteAll)
+					&& (!writing || (d < 0 && !nIn.selectionStart && !nIn.selectionEnd))) {
 					e.preventDefault(); e.stopPropagation();
 					return walkNotes(d);
 				}
@@ -3312,6 +3395,7 @@ function build(w) {
 			panelHints();
 		});
 
+		shutPanel = closePanel;
 		filter();
 		paintChips();
 		paintTagDrop();
@@ -3352,6 +3436,7 @@ function build(w) {
 				case "m": e.preventDefault(); return openPanel(manageJob("move", current()));
 				case "t": e.preventDefault(); return openPanel(manageJob("tags", current()));
 				case "n": e.preventDefault(); return openNotes();
+				case "N": e.preventDefault(); return doNoteAll();
 				case "x": e.preventDefault(); return doTrash();
 				case "p": e.preventDefault(); return doPreview();
 				case "P": e.preventDefault(); return doPreviewAll();

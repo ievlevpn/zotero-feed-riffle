@@ -121,6 +121,13 @@ end puts you back in the box, and clicking a tag picks it just the same.
 — <kbd>↑</kbd> and <kbd>↓</kbd> walk them, and down off the last one is the
 empty box where a new note gets written, so writing is somewhere you go rather
 than where the panel drops you. Nothing to read means the box straight away.
+<kbd>Shift</kbd>+<kbd>N</kbd> keeps them open: the panel stays up as you go, so
+<kbd>←</kbd> and <kbd>→</kbd> turn cards from inside it and each item's notes
+are simply there — an item with none says so rather than dropping you in the
+box, since the arrows would then be typing. In the box they are typing:
+<kbd>↑</kbd> off its first character is the way back out to the notes, and to
+the cards. <kbd>Esc</kbd> steps out to the bare card for a <kbd>t</kbd> or an
+<kbd>x</kbd>, and the notes come back on the next one.
 <kbd>m</kbd> moves the item to another collection (a move, not a copy: it leaves
 the one you are riffling), and <kbd>x</kbd> puts it in Zotero's trash. Each panel
 shows its own row and nothing else.
