@@ -107,7 +107,9 @@ you return to opens its own fuzzy list again.
 ## Riffling a collection
 
 Right-click a collection → **Riffle This Collection…** deals its items out the
-same way, but a collection is not a feed: nothing here is being cleared, so the
+same way — or **Tools → Riffle a Collection…**, which opens the one you riffled
+last (any collection at all, the first time) and leaves <kbd>f</kbd> to switch.
+A collection is not a feed: nothing here is being cleared, so the
 arrows only move. <kbd>←</kbd> and <kbd>→</kbd> step through the deck and write
 nothing at all; you can walk a collection end to end and close the window
 without having touched it.
@@ -173,6 +175,16 @@ position.
 counts in the collections pane use, and the one Zotero's existing feed cleanup
 reaps items on. So discarding here is exactly discarding there, and nothing
 this plugin does needs undoing if you uninstall it.
+
+Notes are written as HTML, so a little inline markup comes through:
+`**bold**`, `*italic*` or `_italic_`, `` `code` ``, and maths — `$x^2$` inline,
+a line of `$$…$$` on its own as a block. Those last are stored exactly as
+Zotero's own note editor stores maths, so the note opens there with the formula
+set rather than the dollars showing. Nothing inside code or maths is read as
+emphasis, `snake_case` stays a name, `a * b` stays arithmetic, and `$5 and $10`
+stays a price. Everything else is text: type a `<` and you get a `<`. Riffle's own
+note pane reads them back the same way — bold is bold and formulas are set,
+with the same KaTeX the cards use.
 
 *Keeping* clones the feed entry straight into the collection, locally. It does
 **not** run `translate()` the way *Add to My Library* does: that loads the page

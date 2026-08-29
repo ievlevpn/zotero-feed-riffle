@@ -17,6 +17,7 @@ const LAST_PREF = "feedRiffle.lastCollection"; // collection id Enter defaults t
 const STATE_PREF = "feedRiffle.state";         // window geometry
 const SIZE_PREF = "feedRiffle.fontScale";      // your own +/- adjustment
 const RECENT_PREF = "feedRiffle.recentCollections"; // most recently filed into
+const DECK_PREF = "feedRiffle.lastDeck";       // collection id last riffled
 const STATS_PREF = "feedRiffle.summary";       // false: the finish summary stays off
 const RT_PREF = "feedRiffle.readingTime";      // unset: ask once; then true or false
 const RECENT_MAX = 9; // as many as there are number keys
@@ -854,11 +855,6 @@ function features(main) {
 	return `chrome,resizable,scrollbars,width=${Math.round(g.w)},height=${Math.round(g.h)},${where}`;
 }
 
-function lastCollectionID() {
-	const id = parseInt(Zotero.Prefs.get(LAST_PREF), 10);
-	return Number.isInteger(id) && safe(() => !!Zotero.Collections.get(id), false) ? id : null;
-}
-
 // --- data ------------------------------------------------------------------
 
 // Unread feed items, newest first. Only the ids: hydrating 2000-odd items to
@@ -1044,10 +1040,46 @@ async function discard(item) {
 
 // A typed note as Zotero stores it: one paragraph a line, and nothing in the
 // text taken for markup. Exported for test.js.
+const escapeHTML = (s) =>
+	String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+// The little inline markup worth having in a note, on text that is already
+// escaped. Code spans and maths are lifted out first and put back last, so
+// nothing inside them is read as emphasis — `a*b*c` and $a*b*c$ are literal.
+//
+// Maths is written the way Zotero's own note editor writes it, so a note made
+// here opens there with the formula set rather than the dollars showing:
+// <span class="math">$…$</span> inline, <pre class="math">$$…$$</pre> alone on
+// a line. KaTeX is Zotero's renderer as well as ours.
+//
+// ponytail: inline only. Lists, headings and tables are a document format, and
+// a two-line box is not where you write one.
+function inlineNote(esc) {
+	const kept = [];
+	const park = (html) => "\u0000" + (kept.push(html) - 1) + "\u0000";
+	return esc
+		.replace(/`([^`\n]+)`/g, (m, code) => park("<code>" + code + "</code>"))
+		// The same test the cards use on a feed's dollars, for the same reason:
+		// "costs $5 and $10 a year" is a price, not a formula.
+		.replace(/\$([^$\n]+)\$/g, (m, tex) =>
+			(looksLikeMath(tex) ? park('<span class="math">$' + tex + "$</span>") : m))
+		.replace(/\*\*(\S(?:[^*\n]*\S)?)\*\*/g, "<strong>$1</strong>")
+		// One star or underscore, and never around whitespace: "a * b" is
+		// arithmetic and "snake_case_name" is a name.
+		.replace(/\*(\S(?:[^*\n]*\S)?)\*/g, "<em>$1</em>")
+		.replace(/(^|[\s(])_(\S(?:[^_\n]*\S)?)_(?=$|[\s.,;:!?)])/g, "$1<em>$2</em>")
+		.replace(/\u0000(\d+)\u0000/g, (m, i) => kept[i]);
+}
+
 function noteHTML(text) {
-	return String(text || "").split(/\n/).map((line) =>
-		"<p>" + line.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])) + "</p>"
-	).join("");
+	return String(text || "").split(/\n/).map((line) => {
+		// A line that is nothing but display maths becomes the block Zotero
+		// keeps those in; anything else is a paragraph.
+		const block = line.match(/^\s*\$\$([^$]+)\$\$\s*$/);
+		return block
+			? '<pre class="math">$$' + escapeHTML(block[1]) + "$$</pre>"
+			: "<p>" + inlineNote(escapeHTML(line)) + "</p>";
+	}).join("");
 }
 
 // A local clone, not FeedItem#translate(). translate() loads the page in a
@@ -1752,8 +1784,11 @@ function typesetInto(doc, root) {
 	const walk = (n) => {
 		for (const c of n.childNodes) {
 			if (c.nodeType === 3) texts.push(c);
-			// Preformatted text is quoted verbatim; it is not maths.
-			else if (c.nodeType === 1 && c.localName !== "pre" && c.localName !== "code") walk(c);
+			// Preformatted text is quoted verbatim; it is not maths — unless it
+			// says it is, which is how both Zotero's note editor and MathJax
+			// write a displayed formula.
+			else if (c.nodeType === 1
+				&& (!/^(pre|code)$/.test(c.localName) || /math/.test(c.className || ""))) walk(c);
 		}
 	};
 	walk(root);
@@ -1821,8 +1856,27 @@ function closeOrphanWindows() {
 	});
 }
 
+// The collection a deck was last dealt from, so the Tools menu — which has no
+// row you right-clicked to go on — opens where you left off.
+function lastDeckID() {
+	const id = parseInt(safe(() => Zotero.Prefs.get(DECK_PREF), ""), 10);
+	return Number.isInteger(id) && safe(() => !!Zotero.Collections.get(id), false) ? id : null;
+}
+
+// From the Tools menu: the collection you riffled last, or the first one there
+// is. Which one hardly matters — f switches without leaving the window.
+function openSomeCollection() {
+	const id = lastDeckID() || safe(() => (flatCollections()[0] || {}).id, null);
+	if (!id) {
+		return safe(() => Services.prompt.alert(Zotero.getMainWindow(),
+			"Feed Riffle", "There are no collections to riffle."));
+	}
+	return openCollection(id);
+}
+
 function openCollection(collectionID) {
 	if (!collectionID) return;
+	safe(() => Zotero.Prefs.set(DECK_PREF, String(collectionID)));
 	mode = "collection";
 	scopeColl = collectionID;
 	scopeLib = null;
@@ -1990,7 +2044,10 @@ function build(w) {
 			closeFeeds();
 			if (!r || r.id === here) return;
 			if (feed) scopeLib = r.id;
-			else scopeColl = r.id;
+			else {
+				scopeColl = r.id;
+				safe(() => Zotero.Prefs.set(DECK_PREF, String(r.id)));
+			}
 			reload().catch(oops);
 		};
 
@@ -3188,6 +3245,10 @@ function build(w) {
 				// note are usually pasted figures — this is a place to find the
 				// note again, not a second note editor.
 				const frag = sanitizedFragment(doc, safe(() => on.getNote(), "") || "");
+				// Read here the way it reads in Zotero: its editor stores maths
+				// as $…$ inside a span or pre of class "math", and the cards
+				// already know how to set that.
+				if (frag) safe(() => { markClassMath(frag); typesetInto(doc, frag); });
 				nBody.replaceChildren(frag || doc.createTextNode(""));
 				nBody.scrollTop = 0;
 			}
@@ -3530,7 +3591,11 @@ function startup({ id, rootURI: uri }) {
 		menuID: "feed-riffle",
 		pluginID: id,
 		target: "main/menubar/tools",
-		menus: [{ menuType: "menuitem", l10nID: "feed-riffle-menu", onCommand: () => safe(() => open(null)) }],
+		menus: [
+			{ menuType: "menuitem", l10nID: "feed-riffle-menu", onCommand: () => safe(() => open(null)) },
+			{ menuType: "menuitem", l10nID: "feed-riffle-collections-menu",
+				onCommand: () => safe(() => openSomeCollection()) },
+		],
 	});
 	feedMenuID = Zotero.MenuManager.registerMenu({
 		menuID: "feed-riffle-feed",
@@ -3588,5 +3653,5 @@ if (typeof module !== "undefined") {
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine,
-		noteHTML, bankTime, stat, statReset };
+		noteHTML, inlineNote, bankTime, stat, statReset };
 }

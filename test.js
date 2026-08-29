@@ -338,6 +338,28 @@ assert.strictEqual(seenLine(0, 0, 0), "Nothing here.");
 assert.strictEqual(noteHTML("one\ntwo <b> & three"),
 	"<p>one</p><p>two &lt;b&gt; &amp; three</p>", "a typed note is text, never markup");
 
+// …but the handful of marks worth typing do come through, as the note editor's
+// own HTML: bold, italics, code, and maths the way Zotero stores maths.
+assert.strictEqual(noteHTML("**lalala**"), "<p><strong>lalala</strong></p>");
+assert.strictEqual(noteHTML("a **bold** and *slanted* line"),
+	"<p>a <strong>bold</strong> and <em>slanted</em> line</p>");
+assert.strictEqual(noteHTML("_this_ one"), "<p><em>this</em> one</p>");
+assert.strictEqual(noteHTML("$x^2$ here"),
+	'<p><span class="math">$x^2$</span> here</p>');
+assert.strictEqual(noteHTML("  $$\\int_0^1 f$$  "),
+	'<pre class="math">$$\\int_0^1 f$$</pre>', "a line of nothing but maths is a block");
+assert.strictEqual(noteHTML("$a<b$"), '<p><span class="math">$a&lt;b$</span></p>',
+	"escaped first: the editor reads the text back, angle bracket and all");
+
+// What must NOT be marked up.
+assert.strictEqual(noteHTML("snake_case_name stays"), "<p>snake_case_name stays</p>");
+assert.strictEqual(noteHTML("a * b * c"), "<p>a * b * c</p>", "spaced stars are arithmetic");
+assert.strictEqual(noteHTML("costs $5 and $10 a year"), "<p>costs $5 and $10 a year</p>",
+	"prose between dollars is a price, not a formula");
+assert.strictEqual(noteHTML("`a*b*c` and $a*b*c$"),
+	'<p><code>a*b*c</code> and <span class="math">$a*b*c$</span></p>',
+	"emphasis is not read inside code or maths");
+
 // --- banking the sitting into Reading Time ---------------------------------
 // The other plugin is optional: absent, declined, or unanswered all mean the
 // same thing here — write nothing, say nothing.
