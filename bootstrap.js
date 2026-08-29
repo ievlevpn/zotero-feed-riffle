@@ -33,8 +33,9 @@ const WIN_W = 640;
 const WIN_H = 760;
 // A collection deck answers to more keys and can show a page, so its window
 // starts wider: the hint bar is what sets the floor, and it is measured rather
-// than guessed — every key on one line at the reading size.
-const COLL_W = 810;
+// than guessed — every key on one line at the reading size. The column of text
+// stays the same measure inside it, centred.
+const COLL_W = 930;
 const COLL_H = 860;
 const SIZE_MIN = 0.7, SIZE_MAX = 2.4, SIZE_STEP = 0.08;
 const AHEAD = 25;   // items hydrated ahead of the cursor
@@ -63,6 +64,10 @@ let scopeColl = null;  // collection id to riffle instead, when riffling one
 // typography, the panel, undo, the animation — is the same either way; a mode
 // is only the handful of places where a feed and a collection differ.
 let mode = "feed";     // "feed" or "collection"
+// Whether a collection deck reaches into what is filed below it. Starts from
+// Zotero's own View setting, so a deck holds what its items list holds, and s
+// changes it for this window without touching Zotero's.
+let deep = false;
 const isFeedMode = () => mode === "feed";
 let libKeys = new Map(); // DOI/arXiv key → the { id, colls } already in the library
 const RIFFLE_ATTR = "data-feed-riffle"; // marks our window, across installs
@@ -843,7 +848,15 @@ async function loadIDs(libraryID) {
 async function loadCollectionIDs(collectionID) {
 	const c = safe(() => Zotero.Collections.get(collectionID), null);
 	if (!c) return [];
-	const ids = safe(() => c.getChildItems(true), []);
+	const from = [c];
+	if (deep) {
+		for (const d of safe(() => c.getDescendents(false, "collection"), [])) {
+			const sub = safe(() => Zotero.Collections.get(d.id), null);
+			if (sub) from.push(sub);
+		}
+	}
+	// A set: an item filed in two of them is still one card.
+	const ids = [...new Set(from.flatMap((coll) => safe(() => coll.getChildItems(true), [])))];
 	const items = await Zotero.Items.getAsync(ids);
 	await Zotero.Items.loadDataTypes(items, ["itemData"]);
 	return items
@@ -1752,6 +1765,7 @@ function openCollection(collectionID) {
 	mode = "collection";
 	scopeColl = collectionID;
 	scopeLib = null;
+	deep = safe(() => !!Zotero.Prefs.get("recursiveCollections"), false);
 	return openWindow();
 }
 
@@ -2065,7 +2079,8 @@ function build(w) {
 			["n", "note", () => openPanel(manageJob("note", current()))],
 			["m", "move", () => openPanel(manageJob("move", current()))],
 			["x", "trash", doTrash], ["p/P", "page", [doPreview, doPreviewAll]],
-			["u", "undo", doUndo], ["f", "switch", openFeeds], ["o", "open", openURL],
+			["u", "undo", doUndo], ["s", "subcollections", doDeep],
+			["f", "switch", openFeeds], ["o", "open", openURL],
 			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
 				() => setScale(fontScale - SIZE_STEP)]],
 			["Esc", "close", stop]]);
@@ -2312,9 +2327,10 @@ function build(w) {
 		}
 
 		feedName.title = isFeedMode() ? "Switch feed" : "Switch collection";
+		const collName = safe(() => Zotero.Collections.get(scopeColl).name, "");
 		feedName.textContent = isFeedMode()
 			? safe(() => Zotero.Libraries.get(item.libraryID).name, "")
-			: safe(() => Zotero.Collections.get(scopeColl).name, "");
+			: collName + (deep ? " + subcollections" : "");
 		count.textContent = `${cursor + 1} / ${total}`;
 
 		// hyphens:auto does nothing without a language to hyphenate by. Feeds
@@ -2455,6 +2471,15 @@ function build(w) {
 		if (!att) return flash("No PDF on this item");
 		previewing = !previewing;
 		render();
+	};
+
+	// What is filed below this collection, in the deck or not. Zotero's own
+	// setting decides to begin with; this is the same switch, for this window.
+	const doDeep = () => {
+		if (busy) return;
+		deep = !deep;
+		flash(deep ? "With subcollections" : "This collection only");
+		reload().catch(oops);
 	};
 
 	// The same, for every card from here on.
@@ -3176,7 +3201,7 @@ function build(w) {
 				case "x": e.preventDefault(); return doTrash();
 				case "p": e.preventDefault(); return doPreview();
 				case "P": e.preventDefault(); return doPreviewAll();
-				case "s": e.preventDefault(); return;
+				case "s": e.preventDefault(); return doDeep();
 				default: break;
 			}
 		}

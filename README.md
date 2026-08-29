@@ -139,6 +139,13 @@ other way round for every card from there on — pages by default, and
 for a page and not before: a plugin you never press <kbd>p</kbd> in should not
 pay for a megabyte of module.
 
+<kbd>s</kbd> takes in what is filed below the collection as well, so a parent
+with six subcollections deals one deck rather than seven; the header says
+*+ subcollections* while it does. It starts from Zotero's own *Show Items from
+Subcollections* setting, so a deck holds what its items list holds, and changes
+only this window rather than that setting. An item filed in two subcollections
+is still one card.
+
 <kbd>f</kbd>, or the collection's name in the header, switches to another
 collection without leaving the window — the same picker feeds get, fuzzy-matching
 the full path and carrying each collection's item count.
@@ -220,7 +227,7 @@ prose, the math and the chrome together rather than drifting apart.
 curly quotes, and text is held to a readable measure — about 34rem, near the 75
 characters past which the eye starts losing the next line. The window opens at a
 fixed size and stays that shape whatever the item or the font size: 640×760 for
-a feed deck and 810×860 for a collection one, each being what its hint bar needs
+a feed deck and 930×860 for a collection one, each being what its hint bar needs
 to list every key on one line — measured, not guessed. Resize it and the size is
 remembered, per deck, since the two are not asking for the same window; widen it
 past the column and the text centres rather than hugging the left edge, the way
