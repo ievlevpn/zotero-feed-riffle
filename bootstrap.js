@@ -1110,28 +1110,34 @@ function paintTag(node, color) {
 	node.style.color = "color-mix(in srgb, " + color + " 70%, CanvasText)";
 }
 
-// pdf.js, the copy Zotero ships with its reader. Loaded on the first page you
-// ask to see and kept: it is a megabyte of module, and a plugin you never press
-// p in should not pay for it.
-let pdfjs = null;
+// pdf.js, the copy Zotero ships with its reader — loaded into the riffle
+// window's own global, not the system one: importESModule loads a module beside
+// Zotero's own code, where the built-in prototypes are frozen, and pdf.js
+// installs a polyfill on Map.prototype as it loads. A module script in this
+// document runs in this window, where they are not.
+//
+// Which means it belongs to the window, and is kept on it rather than here: a
+// closed window takes its global with it, and a module reached for afterwards
+// is a live object in a dead compartment — calls into it hang. Riffle, close
+// the window, riffle again, and the first page never arrives.
 const PDFJS_URL = "resource://zotero/reader/pdf/build/pdf.mjs";
 
-// Into the window's own global, not the system one: importESModule loads a
-// module beside Zotero's own code, where the built-in prototypes are frozen,
-// and pdf.js installs a polyfill on Map.prototype as it loads — "Map.prototype
-// is not extensible" and nothing renders. A module script in this document runs
-// in this window, where they are not.
-async function loadPDFJS() {
-	if (pdfjs) return pdfjs;
-	if (!win || win.closed) throw new Error("the window is gone");
-	const doc = win.document;
-	pdfjs = await new Promise((resolve, reject) => {
-		const done = (lib) => (lib && typeof lib.getDocument === "function"
-			? resolve(lib) : reject(new Error("Zotero's pdf.js is not where it used to be")));
-		const timer = win.setTimeout(() => reject(new Error("pdf.js did not load")), 15000);
-		win.addEventListener("riffle-pdfjs", () => {
-			win.clearTimeout(timer);
-			done(win._rifflePDFJS);
+function importPDFJS(w) {
+	const doc = w.document;
+	return new Promise((resolve, reject) => {
+		const timer = w.setTimeout(() => reject(new Error("pdf.js did not load")), 15000);
+		w.addEventListener("riffle-pdfjs", () => {
+			w.clearTimeout(timer);
+			const lib = w._rifflePDFJS;
+			if (!lib || typeof lib.getDocument !== "function") {
+				return reject(new Error("Zotero's pdf.js is not where it used to be"));
+			}
+			// Its own worker, from the same place. Without this pdf.js goes
+			// looking for one relative to the document, which is about:blank.
+			safe(() => {
+				lib.GlobalWorkerOptions.workerSrc = PDFJS_URL.replace("pdf.mjs", "pdf.worker.mjs");
+			});
+			resolve(lib);
 		}, { once: true });
 		const tag = doc.createElement("script");
 		tag.type = "module";
@@ -1141,17 +1147,25 @@ async function loadPDFJS() {
 			+ 'window._rifflePDFJS = lib;'
 			+ 'window.dispatchEvent(new Event("riffle-pdfjs"));';
 		tag.addEventListener("error", () => {
-			win.clearTimeout(timer);
+			w.clearTimeout(timer);
 			reject(new Error("pdf.js would not load"));
 		}, { once: true });
 		(doc.head || doc.documentElement).append(tag);
-	}).catch((e) => { pdfjs = null; throw e; });
-	// Its own worker, from the same place. Without this pdf.js goes looking for
-	// one relative to the document, which here is about:blank.
-	safe(() => {
-		pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_URL.replace("pdf.mjs", "pdf.worker.mjs");
 	});
-	return pdfjs;
+}
+
+async function loadPDFJS() {
+	const w = win;
+	if (!w || w.closed) throw new Error("the window is gone");
+	if (w._rifflePDFJS) return w._rifflePDFJS;
+	// One load per window, however many pages are asked for at once.
+	if (!w._rifflePDFJSLoad) {
+		w._rifflePDFJSLoad = importPDFJS(w).catch((e) => {
+			w._rifflePDFJSLoad = null;
+			throw e;
+		});
+	}
+	return w._rifflePDFJSLoad;
 }
 
 // The file a card could show a page of, if it has one. getBestAttachment is
