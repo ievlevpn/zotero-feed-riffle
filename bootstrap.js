@@ -1255,6 +1255,16 @@ async function retag(item, wanted) {
 }
 
 // A note of your own on an item you already own.
+// The notes an item already has, in the order Zotero's own item pane lists
+// them. getNotes() reads the child items and getNote() the text, and neither is
+// loaded by getAsync — a card carries primary data and nothing else.
+async function itemNotes(item) {
+	await Zotero.Items.loadDataTypes([item], ["childItems"]);
+	const notes = await Zotero.Items.getAsync(safe(() => item.getNotes(), []));
+	if (notes.length) await Zotero.Items.loadDataTypes(notes, ["itemData", "note"]);
+	return notes;
+}
+
 async function addNote(item, note) {
 	const n = new Zotero.Item("note");
 	n.libraryID = item.libraryID;
@@ -1578,6 +1588,17 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	background:Canvas; color:CanvasText; padding:.25rem .5rem; border-radius:5px;
 	border:1px solid color-mix(in srgb, GrayText 45%, Canvas); }
 .row textarea { resize:vertical; min-height:3rem; }
+/* The notes already on the item: one at a time, read-only, with the box you
+ * would write a new one in taking the place of the last. */
+.row .notes { flex:1; min-width:0; display:flex; flex-direction:column; gap:.3rem; }
+.notehead { font-size:.72rem; color:GrayText; font-variant-numeric:tabular-nums; }
+.notebody { max-height:9rem; overflow:auto; font-size:.85rem; line-height:1.45;
+	background:Canvas; color:CanvasText; padding:.3rem .5rem; border-radius:5px;
+	border:1px solid color-mix(in srgb, GrayText 45%, Canvas); }
+.notebody:focus { outline:none; border-color:Highlight;
+	box-shadow:0 0 0 2px color-mix(in srgb, Highlight 30%, transparent); }
+.notebody > :first-child { margin-top:0; }
+.notebody > :last-child { margin-bottom:0; }
 .row input:focus, .row textarea:focus { outline:none; border-color:Highlight;
 	box-shadow:0 0 0 2px color-mix(in srgb, Highlight 30%, transparent); }
 
@@ -1997,12 +2018,13 @@ function build(w) {
 	// Links open in the real browser: this window is the riffle UI, and
 	// navigating it away would end the session. Delegated from the card, which
 	// outlives each render, so it covers the description and the item URL both.
-	cardBox.addEventListener("click", (e) => {
+	const openLinks = (e) => {
 		const a = e.target && e.target.closest && e.target.closest("a[href]");
 		if (!a) return;
 		e.preventDefault();
 		safe(() => Zotero.launchURL(a.href));
-	});
+	};
+	cardBox.addEventListener("click", openLinks);
 	const bar = el(doc, "div", "bar");
 	doc.body.append(head, cardBox, bar);
 
@@ -2108,7 +2130,7 @@ function build(w) {
 			["Esc", "close", stop]]
 		: [["←/→", "browse", [prev, next]],
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
-			["n", "note", () => openPanel(manageJob("note", current()))],
+			["n", "note", () => openNotes()],
 			["m", "move", () => openPanel(manageJob("move", current()))],
 			["x", "trash", doTrash], ["p/P", "page", [doPreview, doPreviewAll]],
 			["u", "undo", doUndo], ["s", "subcollections", doDeep],
@@ -2711,11 +2733,12 @@ function build(w) {
 	// One panel, one purpose: tags, a note, or a move. Each shows its own row
 	// and nothing else — a note box with a tag box sitting on top of it was
 	// only ever the feed's tab-through-everything flow.
-	const manageJob = (kind, item) => ({
+	const manageJob = (kind, item, notes) => ({
 		label: "Move to",
 		pick: kind === "move",
 		only: true,
 		start: kind === "tags" ? 1 : kind === "note" ? 2 : 0,
+		notes: notes || [],
 		// The tags it already has, so the panel is what the item looks like
 		// rather than a list of additions.
 		tags: kind === "tags"
@@ -2746,6 +2769,17 @@ function build(w) {
 			})()).catch((e) => { oops(e); flash("Failed — see the error console"); });
 		},
 	});
+
+	// Reading the notes is a database trip, so the panel opens after it rather
+	// than filling in behind your back. Failing to read them is not a reason to
+	// refuse the panel: writing a new one still works.
+	function openNotes() {
+		const item = current();
+		if (!item || panel || busy) return;
+		itemNotes(item)
+			.catch((e) => { oops(e); return []; })
+			.then((notes) => { if (!panel) openPanel(manageJob("note", item, notes)); });
+	}
 
 	function openPanel(job) {
 		const item = current();
@@ -3053,14 +3087,62 @@ function build(w) {
 		};
 
 		// -- note row (revealed on the second Tab)
+		//
+		// What the item already has, read-only, one at a time — there are rarely
+		// enough for a list to earn its space, and the arrows walk them. Past the
+		// last one is the empty box: writing a note is somewhere you go, not
+		// where the panel drops you.
+		const notes = job.notes || [];
+		let nSel = Math.max(0, notes.length - 1);   // the last one, or the box
 		const nRow = el(doc, "div", "row");
 		nRow.style.display = "none";
 		nRow.append(el(doc, "label", null, "Note"));
+		const nWrap = el(doc, "div", "notes");
+		const nHead = el(doc, "div", "notehead");
+		// Focusable so the panel's own keys keep working while you read: this is
+		// where the arrows land when nothing is being typed into.
+		const nBody = el(doc, "div", "notebody");
+		nBody.tabIndex = -1;
 		const nIn = doc.createElement("textarea");
 		nIn.rows = 2;
 		nIn.placeholder = "Why this one…";
-		nRow.append(nIn);
+		nWrap.append(nHead, nBody, nIn);
+		nRow.append(nWrap);
 		panel.append(nRow);
+		panel.addEventListener("click", openLinks);
+
+		const onNote = () => notes[nSel] || null;
+
+		const paintNotes = () => {
+			const on = onNote();
+			nHead.style.display = notes.length ? "" : "none";
+			nBody.style.display = on ? "" : "none";
+			nIn.style.display = on ? "none" : "";
+			if (on) {
+				const when = safe(() => Zotero.Date.sqlToDate(on.dateModified, true)
+					.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }), "");
+				nHead.textContent = `${nSel + 1} of ${notes.length}${when ? " · " + when : ""}`;
+				// The same sanitizer the cards use. It drops images, which in a
+				// note are usually pasted figures — this is a place to find the
+				// note again, not a second note editor.
+				const frag = sanitizedFragment(doc, safe(() => on.getNote(), "") || "");
+				nBody.replaceChildren(frag || doc.createTextNode(""));
+				nBody.scrollTop = 0;
+			}
+			else if (notes.length) nHead.textContent = "New note";
+		};
+
+		// Down off the last note is the box; up out of the box is the last note,
+		// but only from the very start of it — anywhere else the arrows are
+		// editing the text you are typing.
+		const walkNotes = (d) => {
+			const next = Math.max(0, Math.min(notes.length, nSel + d));
+			if (next === nSel) return;
+			nSel = next;
+			paintNotes();
+			(onNote() ? nBody : nIn).focus();
+			panelHints();
+		};
 
 		// Escape means "back one row", and only closes from the first one — same
 		// as the key does. It puts the row away, rather than only leaving it.
@@ -3094,9 +3176,14 @@ function build(w) {
 					.concat(typed || job.only ? [] : [["⇥", "add note", () => setStage(2)]])
 					.concat(job.only ? [] : [["⇧⇥", "back", () => setStage(0)]])
 					.concat([["Esc", "cancel", back]]));
+			} else if (onNote()) {
+				hint([["↑↓", "browse", () => walkNotes(1)],
+					["⏎", "new note", () => walkNotes(notes.length - nSel)],
+					["Esc", "back", back]]);
 			} else {
 				// Nothing to click about a modifier: ⇧⏎ describes the key alone.
 				hint([["⏎", done, () => commit()], ["⇧⏎", "newline"]]
+					.concat(notes.length ? [["↑", "notes", () => walkNotes(-1)]] : [])
 					.concat(job.only ? [] : [["⇧⇥", "back", () => setStage(1)]])
 					.concat([["Esc", "cancel", back]]));
 			}
@@ -3111,7 +3198,7 @@ function build(w) {
 			tRow.style.display = (job.only ? stage === 1 : reach >= 1) ? "" : "none";
 			nRow.style.display = (job.only ? stage === 2 : reach >= 2) ? "" : "none";
 			cDrop.style.display = stage === 0 ? "" : "none";
-			(stage === 0 ? cIn : stage === 1 ? tIn : nIn).focus();
+			(stage === 0 ? cIn : stage === 1 ? tIn : onNote() ? nBody : nIn).focus();
 			panelHints();
 		};
 		// Clicking straight into a box is the same as tabbing to it.
@@ -3184,6 +3271,8 @@ function build(w) {
 				// suggestion if there is one — and Shift+Enter takes the words as
 				// typed instead. An empty box means you are done tagging.
 				if (stage === 1 && tIn.value.trim()) return takeTag(e.shiftKey);
+				// Reading a note, not writing one: Enter is the way to the box.
+				if (onNote()) return walkNotes(notes.length - nSel);
 				return commit();
 			}
 			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -3198,6 +3287,11 @@ function build(w) {
 					e.preventDefault(); e.stopPropagation();
 					tSel = (tSel + d + tShown.length) % tShown.length;
 					return paintTagDrop();
+				}
+				if (stage === 2 && notes.length
+					&& (onNote() || (d < 0 && !nIn.selectionStart && !nIn.selectionEnd))) {
+					e.preventDefault(); e.stopPropagation();
+					return walkNotes(d);
 				}
 				return; // note box: let the caret move
 			}
@@ -3221,6 +3315,7 @@ function build(w) {
 		filter();
 		paintChips();
 		paintTagDrop();
+		paintNotes();
 		setStage(job.start);
 	}
 
@@ -3256,7 +3351,7 @@ function build(w) {
 				case "ArrowRight": e.preventDefault(); return next();
 				case "m": e.preventDefault(); return openPanel(manageJob("move", current()));
 				case "t": e.preventDefault(); return openPanel(manageJob("tags", current()));
-				case "n": e.preventDefault(); return openPanel(manageJob("note", current()));
+				case "n": e.preventDefault(); return openNotes();
 				case "x": e.preventDefault(); return doTrash();
 				case "p": e.preventDefault(); return doPreview();
 				case "P": e.preventDefault(); return doPreviewAll();

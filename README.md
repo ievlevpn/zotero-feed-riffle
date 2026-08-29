@@ -117,9 +117,13 @@ tags the item already has. With the box empty, <kbd>←</kbd> and <kbd>→</kbd>
 walk along the chips and <kbd>⌫</kbd> takes the picked one off — right off the
 end puts you back in the box, and clicking a tag picks it just the same.
 <kbd>Enter</kbd> saves, and the card redraws with what it now carries.
-<kbd>n</kbd> adds a note, <kbd>m</kbd> moves the item to another collection
-(a move, not a copy: it leaves the one you are riffling), and <kbd>x</kbd> puts
-it in Zotero's trash. Each panel shows its own row and nothing else.
+<kbd>n</kbd> opens the notes the item already has, the last one first, read-only
+— <kbd>↑</kbd> and <kbd>↓</kbd> walk them, and down off the last one is the
+empty box where a new note gets written, so writing is somewhere you go rather
+than where the panel drops you. Nothing to read means the box straight away.
+<kbd>m</kbd> moves the item to another collection (a move, not a copy: it leaves
+the one you are riffling), and <kbd>x</kbd> puts it in Zotero's trash. Each panel
+shows its own row and nothing else.
 <kbd>u</kbd> undoes any of it — a trashed or moved card comes back to its own
 place in the deck, and a tag edit is restored exactly, automatic tags included.
 <kbd>o</kbd> opens the item's own file in Zotero's reader, and falls back to the
