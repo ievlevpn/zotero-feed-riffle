@@ -279,6 +279,16 @@ assert.ok(!importerCut("<p>Ordinary feed HTML, ending as it should.</p>"),
 	"real markup is not damage");
 assert.ok(!importerCut("An abstract that just has no full stop"),
 	"and neither is a missing full stop on its own");
+// The other shape: the bogus tag ran to the end of the input, so the parser
+// dropped it whole and left no "<" behind at all. Only the half-cut "$" is left
+// to go on. (arXiv 2607.21374, as Zotero's feed importer stored it.)
+assert.ok(importerCut("Abstract: We consider a fractional Brownian motion $B$ "
+	+ "with Hurst index $0"),
+	"a delimiter with nothing to close it, and the sentence never finishes");
+assert.ok(!importerCut("A tilted variant of $B$ yields a different tangent law."),
+	"balanced delimiters and a full stop: whole");
+assert.ok(!importerCut("The grant was worth $2 million"),
+	"one dollar sign is a currency sign, not a cut");
 
 // --- imgMath: a feed's formulas arrive as pictures, source and all ---------
 assert.strictEqual(imgMath("https://latex.codecogs.com/png.latex?%5Clambda"), "\\lambda",

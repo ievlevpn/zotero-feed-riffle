@@ -604,8 +604,18 @@ function importerCut(raw) {
 	for (let m; (m = tags.exec(s));) {
 		if (!/^[a-z][a-z0-9-]*$/i.test(m[1])) { bogus = true; break; }
 	}
+	// The same damage in its other shape. When the bogus tag ran to the end of
+	// the abstract there was no ">" to close it, so the parser dropped it whole
+	// and no "<" survives for the scan above to find — only text that stops
+	// mid-sentence. What does survive is the "$" it cut in half: arXiv writes
+	// "$0<H<1/2$", and a cut inside one always leaves an odd number behind.
+	// Odd on its own is not enough — "raised $5 million" is odd and intact — so
+	// it counts only where the abstract has real maths in it as well, which is
+	// splitMath's judgement rather than a second guess at it here.
+	const odd = (s.replace(/\\\$/g, "").match(/\$/g) || []).length % 2 === 1;
+	const open = odd && splitMath(s).some((r) => r.math);
 	// A tag at the very end is the serialiser's, not the author's last word.
-	return bogus && !/[.!?)\]}$"”]$/.test(s.replace(/<[^>]*>$/, "").trim());
+	return (bogus || open) && !/[.!?)\]}$"”]$/.test(s.replace(/<[^>]*>$/, "").trim());
 }
 
 // A feed cannot run MathJax, so a site that typesets on the page ships its
