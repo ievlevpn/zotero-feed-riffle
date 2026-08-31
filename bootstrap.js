@@ -48,6 +48,12 @@ const BEHIND = 50;  // and kept behind it, so undo does not have to refetch
 // worse than leaving it as the text it is.
 const MATH_CAP = 400;
 const DROP_CAP = 60; // rows drawn in a picker dropdown
+// Esc stops riffling with cards still in the deck, so the card the keys would
+// act on is real — and out of sight behind the summary. Only the keys that
+// screen itself offers get through; the arrows are handled before this and put
+// you back on the card.
+const END_KEYS = new Set(["Escape", "Enter", "ArrowUp", "ArrowDown", " ",
+	"u", "n", "+", "=", "-", "_", "0"]);
 
 let menuID = null;
 let feedMenuID = null;
@@ -2575,10 +2581,12 @@ function build(w) {
 		}
 
 		feedName.title = isFeedMode() ? "Switch feed" : "Switch collection";
-		const collName = safe(() => Zotero.Collections.get(scopeColl).name, "");
+		// Only the deck that has one looks a collection up: Collections.get(null)
+		// throws, and safe() would log that once per card drawn.
 		feedName.textContent = isFeedMode()
 			? safe(() => Zotero.Libraries.get(item.libraryID).name, "")
-			: collName + (deep ? " + subcollections" : "");
+			: safe(() => Zotero.Collections.get(scopeColl).name, "")
+				+ (deep ? " + subcollections" : "");
 		count.textContent = `${cursor + 1} / ${total}`;
 
 		// hyphens:auto does nothing without a language to hyphenate by. Feeds
@@ -2766,11 +2774,16 @@ function build(w) {
 			undoStack.push({
 				id: item.id,
 				at,
+				// Says so rather than being guessed at from the shape: a trash
+				// has a revert, and everything with a revert read as a keep.
+				kind: "dropped",
 				revert: async () => { await back(); ids.splice(at, 0, item.id); },
 			});
 			flash("Trashed");
 		})).catch((e) => {
 			oops(e);
+			// The card is coming back, so it is not on the tally either.
+			stat.dropped = Math.max(0, stat.dropped - 1);
 			flash("Trash failed — see the error console");
 			ids.splice(at, 0, item.id);
 			cursor = at;
@@ -2832,7 +2845,7 @@ function build(w) {
 		guard(undo().then((was) => {
 			if (!was) return flash("Nothing to undo");
 			// Take it off the tally as well: an undone card was never read.
-			const kind = was.skip ? "skipped" : was.revert ? "kept" : "dropped";
+			const kind = was.kind || (was.skip ? "skipped" : was.revert ? "kept" : "dropped");
 			stat[kind] = Math.max(0, stat[kind] - 1);
 			if (was.skip) skipped = Math.max(0, skipped - 1);
 			// A card taken out of the deck goes back where it was.
@@ -2921,7 +2934,9 @@ function build(w) {
 		notes: notes || [],
 		// The tags it already has, so the panel is what the item looks like
 		// rather than a list of additions.
-		tags: kind === "tags"
+		// `item` can be absent — the end of the deck, or a card still hydrating.
+		// openPanel() turns that away; this must not throw before it gets there.
+		tags: kind === "tags" && item
 			? orderTags(item.libraryID, safe(() => item.getTags(), []).map((t) => t.tag))
 			: [],
 		run: (card, c, tags, note) => {
@@ -3599,6 +3614,9 @@ function build(w) {
 			ending = false;
 			return render();
 		}
+		// Everything else that acts on a card would act on one you cannot see:
+		// a stray 1 filed it, s skipped it, x trashed it.
+		if (ending && !END_KEYS.has(e.key)) return;
 		// A collection deck acts on different keys: the arrows only move through
 		// it, and everything that changes an item says so by name.
 		if (!isFeedMode()) {
