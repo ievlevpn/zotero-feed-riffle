@@ -3,8 +3,8 @@
     "feed-riffle@local": {
       "updates": [
         {
-          "version": "0.12.1",
-          "update_link": "https://github.com/ievlevpn/zotero-feed-riffle/releases/download/v0.12.1/feed-riffle.xpi",
+          "version": "0.12.2",
+          "update_link": "https://github.com/ievlevpn/zotero-feed-riffle/releases/download/v0.12.2/feed-riffle.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "6.999",
