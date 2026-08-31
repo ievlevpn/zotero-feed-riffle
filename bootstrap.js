@@ -255,6 +255,29 @@ const ACCENTS = {
 };
 const LIGATURES = { ss: "ß", o: "ø", O: "Ø", l: "ł", L: "Ł", ae: "æ", AE: "Æ", aa: "å", AA: "Å" };
 
+// Symbols an author writes into a title with no delimiters around them —
+// "{\phi}-divergences", "\alpha-stable", "L^\infty". Deleting a command is the
+// right answer for \emph and \textbf, which is what the catch-all in deLatex()
+// is for; for these it leaves the word a letter short and says nothing about it.
+// The variants map the way KaTeX renders them, so a formula written "$\phi$"
+// and one written "\phi" come out as the same character on the card.
+const SYMBOLS = {
+	alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ϵ", varepsilon: "ε",
+	zeta: "ζ", eta: "η", theta: "θ", vartheta: "ϑ", iota: "ι", kappa: "κ",
+	lambda: "λ", mu: "μ", nu: "ν", xi: "ξ", pi: "π", varpi: "ϖ", rho: "ρ",
+	varrho: "ϱ", sigma: "σ", varsigma: "ς", tau: "τ", upsilon: "υ", phi: "ϕ",
+	varphi: "φ", chi: "χ", psi: "ψ", omega: "ω",
+	Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Xi: "Ξ", Pi: "Π",
+	Sigma: "Σ", Upsilon: "Υ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+	infty: "∞", times: "×", cdot: "·", pm: "±", mp: "∓", leq: "≤", le: "≤",
+	geq: "≥", ge: "≥", neq: "≠", ne: "≠", approx: "≈", sim: "∼", equiv: "≡",
+	to: "→", rightarrow: "→", leftarrow: "←", mapsto: "↦", partial: "∂",
+	nabla: "∇", in: "∈", notin: "∉", subset: "⊂", subseteq: "⊆", cup: "∪",
+	cap: "∩", setminus: "∖", ell: "ℓ", hbar: "ℏ", dots: "…", ldots: "…",
+	cdots: "⋯", circ: "∘", oplus: "⊕", otimes: "⊗", perp: "⊥", angle: "∠",
+	sqrt: "√", sum: "∑", prod: "∏", int: "∫", forall: "∀", exists: "∃",
+};
+
 // Deliberately does not trim: this also cleans the plain-text runs between two
 // bits of math, where the leading space of " elements." is load-bearing.
 // Callers that want a tidy standalone string trim it themselves.
@@ -279,8 +302,12 @@ function deLatex(s) {
 		// \ss, \o, \aa and friends
 		.replace(/\\(ss|ae|AE|aa|AA|[oOlL])\b\{?\}?/g, (m, k) => LIGATURES[k] || m)
 		.replace(/\\\\/g, " ")           // a row break, in text, is just a space
-		.replace(/\\[a-zA-Z]+\s?/g, "") // any leftover command, before the
-		.replace(/[{}]/g, "");             // braces that keep it from over-eating
+		// Any leftover command, before the braces that keep it from over-eating.
+		// A command that names a symbol keeps the space after it: TeX would eat
+		// it, but "\alpha stable" reading as "αstable" is not what the author
+		// meant by writing it that way.
+		.replace(/\\([a-zA-Z]+)([ \t]?)/g, (m, w, sp) => (SYMBOLS[w] ? SYMBOLS[w] + sp : ""))
+		.replace(/[{}]/g, "");
 }
 
 // Keys that identify the same work across a feed and the library. A DOI is

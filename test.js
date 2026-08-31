@@ -35,9 +35,18 @@ assert.ok(!/[\\{}]/.test(deLatex("Mine \\c{C}a\\u{g}lar")), "no TeX left behind"
 // A control word takes the longest run of letters, so "\\v" must not claim the
 // "a" of "\\varepsilon". Getting this wrong turned \\varepsilon into "arepsilon",
 // \\cdot into "dot" and \\cup into "up" in text-mode runs.
-assert.strictEqual(deLatex("\\varepsilon"), "", "\\v does not eat \\varepsilon");
-assert.strictEqual(deLatex("\\cdot"), "", "\\c does not eat \\cdot");
+assert.strictEqual(deLatex("\\varepsilon"), "ε", "\\v does not eat \\varepsilon");
+assert.strictEqual(deLatex("\\cdot"), "·", "\\c does not eat \\cdot");
 assert.strictEqual(deLatex("\\underline"), "", "\\u does not eat \\underline");
+// A symbol written into prose with no delimiters round it, which is how arXiv
+// titles carry Greek. Deleting the command left the word a letter short.
+assert.strictEqual(deLatex("and {\\phi}-divergences"), "and ϕ-divergences",
+	"a braced symbol survives the braces coming off");
+assert.strictEqual(deLatex("\\alpha-stable processes"), "α-stable processes");
+assert.strictEqual(deLatex("\\alpha stable"), "α stable",
+	"the space after a symbol stays, whatever TeX would do with it");
+assert.strictEqual(deLatex("An \\emph{emphatic} title"), "An emphatic title",
+	"a command that is not a symbol still goes, space and all");
 assert.strictEqual(deLatex("\\vec x"), "x", "a spaced control-word accent still applies");
 assert.strictEqual(deLatex("{Plain}"), "Plain", "braces stripped");
 assert.strictEqual(deLatex("Nothing to do"), "Nothing to do", "untouched when no escapes");
