@@ -577,20 +577,23 @@ function mathInto(doc, parent, tex, display) {
 // parser already handles entities, malformed markup and nesting correctly;
 // hand-written regexes for those only ever approximate it.
 
-// The importer's markup, or a formula? A "<" that came out of maths is not a
-// tag, and the parser is not sceptical: given "Hurst index $0<H<1/2$ and …" it
-// reads "<H<1/2$ and …" as a tag that never closes, and the rest of the
-// abstract is gone — an incomplete tag at the end of the input is dropped, so
-// unparse() has nothing left to serialise back. Text only goes to the parser
-// when something in it really is markup: a tag with a name and its ">", or a
-// character entity. A lone "&" is an ampersand, and a lone "<" is a formula.
-const HTMLISH = /<\/?[a-zA-Z][^<>]*>|&(#\d+|#x[\da-fA-F]+|[a-zA-Z]\w*);/;
-const htmlish = (s) => HTMLISH.test(String(s || ""));
+// The one shape the round trip below cannot survive. An incomplete tag at the
+// end of the input is dropped whole rather than repaired, so a "<" that came
+// out of maths — "at most $i<j$." — takes the rest of the abstract with it, and
+// unparse() cannot serialise back what was never in the tree. Everything else
+// survives, including the words re-serialised as a tag's attributes, which is
+// the damage the parse is here to undo in the first place.
+// ponytail: the whole string is held back, though only its tail is at risk.
+// Parse the head and keep the tail raw if an abstract ever needs both.
+const eatsTail = (s) => {
+	const i = s.lastIndexOf("<");
+	return i >= 0 && /^<[a-zA-Z/]/.test(s.slice(i)) && s.indexOf(">", i) < 0;
+};
 
 function parseHTML(doc, raw) {
 	const view = doc.defaultView;
 	const s = String(raw || "");
-	if (!view || !view.DOMParser || !htmlish(s)) return null;
+	if (!view || !view.DOMParser || !/[<&]/.test(s) || eatsTail(s)) return null;
 	return safe(() => new view.DOMParser().parseFromString(s, "text/html"), null);
 }
 
@@ -1875,7 +1878,7 @@ function abstractNode(doc, raw, baseURL) {
 	const box = el(doc, "div", "abs");
 	raw = inlineImgMath(doc, raw);
 
-	const frag = htmlish(raw) ? sanitizedFragment(doc, raw, baseURL) : null;
+	const frag = /[<&]/.test(String(raw || "")) ? sanitizedFragment(doc, raw, baseURL) : null;
 	if (frag && frag.querySelector && frag.querySelector(BLOCKS)) {
 		markClassMath(frag);
 		typesetInto(doc, frag);
@@ -3744,6 +3747,6 @@ if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
-		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, htmlish,
+		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, eatsTail,
 		noteHTML, inlineNote, bankTime, stat, statReset };
 }

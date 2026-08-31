@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, noteHTML, bankTime, stat, statReset, htmlish } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, noteHTML, bankTime, stat, statReset, eatsTail } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -379,15 +379,20 @@ assert.strictEqual(noteHTML("`a*b*c` and $a*b*c$"),
 	'<p><code>a*b*c</code> and <span class="math">$a*b*c$</span></p>',
 	"emphasis is not read inside code or maths");
 
-// --- is it markup, or is it a formula? ------------------------------------
-// The HTML parser drops an unclosed tag at the end of its input, so anything
-// handed to it by mistake is not merely mangled, it is gone.
-for (const yes of ["<p>hi</p>", "a <i>word</i>", "AT&amp;T", "&#8212;", "&#x2014;",
-	'<img src="x.png">'])
-	assert.ok(htmlish(yes), `markup: ${yes}`);
-for (const no of ["Hurst index $0<H<1/2$ and more words after it",
-	"$a<b$", "Smith & Jones", "the case $n<\\infty$", "plain prose", ""])
-	assert.ok(!htmlish(no), `not markup: ${no}`);
+// --- the one thing the parse cannot survive --------------------------------
+// Everything the importer mangled comes back through parseHTML + unparse: the
+// words it re-serialised as a tag's attributes are still in the tree. What is
+// not in the tree is an unclosed tag at the very end of the input, which the
+// parser drops whole — so only that shape is kept away from the parser.
+assert.ok(eatsTail("at most $i<j$."), "a maths \"<\" with no \">\" after it anywhere");
+assert.ok(eatsTail("bounded by $n<N"), "even with nothing following it");
+assert.ok(!eatsTail("constants $0<c<c'<1$ xmlns=\"http://www.w3.org/1999/xhtml\" "
+	+ "so=\"\" that=\"\" there=\"\" is=\"\" a=\"\" pair=\"\">rest of it</c<c'<1$>"),
+	"the importer's own damage closes, and unparse gets it back");
+assert.ok(!eatsTail("<p>Ordinary feed HTML.</p>"), "real markup");
+assert.ok(!eatsTail("no angle brackets at all"), "and prose is not held back");
+assert.ok(!eatsTail("a < b in prose"), "a \"<\" that opens nothing tag-like");
+assert.ok(!eatsTail(""), "");
 
 // --- banking the sitting into Reading Time ---------------------------------
 // The other plugin is optional: absent, declined, or unanswered all mean the
