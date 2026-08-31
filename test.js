@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, noteHTML, bankTime, stat, statReset, eatsTail } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, noteHTML, bankTime, stat, statReset, eatsTail } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -367,6 +367,16 @@ assert.deepStrictEqual(
 assert.strictEqual(seenLine(24, 24, 0), "24 of 24 seen.");
 assert.strictEqual(seenLine(6, 24, 18), "6 of 24 seen, 18 still to look at.");
 assert.strictEqual(seenLine(0, 0, 0), "Nothing here.");
+
+// --- random ahead: always a card you have not been dealt yet ---------------
+assert.strictEqual(randomAhead(4, 5), null, "last card -> nowhere to go");
+assert.strictEqual(randomAhead(0, 1), null, "one-card deck -> nowhere to go");
+assert.strictEqual(randomAhead(3, 5, () => 0), 4, "floor of the range is the next card");
+assert.strictEqual(randomAhead(0, 10, () => 0.999999), 9, "top of the range is the last card");
+for (let i = 0; i < 200; i++) {
+	const j = randomAhead(2, 10);
+	assert.ok(j >= 3 && j <= 9, "stays ahead of the cursor and inside the deck");
+}
 assert.strictEqual(noteHTML("one\ntwo <b> & three"),
 	"<p>one</p><p>two &lt;b&gt; &amp; three</p>", "a typed note is text, never markup");
 

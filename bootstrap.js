@@ -37,8 +37,8 @@ const WIN_H = 760;
 // starts wider: the hint bar is what sets the floor, and it is measured rather
 // than guessed — every key on one line at the reading size. The column of text
 // stays the same measure inside it, centred.
-const COLL_W = 960;
-const OLD_COLL_W = [810, 930];  // defaults from before the bar grew
+const COLL_W = 1020;
+const OLD_COLL_W = [810, 930, 960];  // defaults from before the bar grew
 const COLL_H = 860;
 const SIZE_MIN = 0.7, SIZE_MAX = 2.4, SIZE_STEP = 0.08;
 const AHEAD = 25;   // items hydrated ahead of the cursor
@@ -367,6 +367,14 @@ function deckLine(cleared, total, skipped, left) {
 	if (skipped) parts.push(skipped + " skipped for later");
 	if (left) parts.push(left + " still unread");
 	return parts.join(", ") + ".";
+}
+
+// Pick a card from cursor+1 onwards to deal next, and say where to swap it
+// from. Never the one you are on, never off the end. Exported for test.js.
+function randomAhead(cursor, len, rnd = Math.random) {
+	const at = cursor + 1;
+	if (at >= len) return null;
+	return at + Math.floor(rnd() * (len - at));
 }
 
 // The same, for a collection you were reading rather than clearing: "24 of 24
@@ -2274,7 +2282,7 @@ function build(w) {
 			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
 				() => setScale(fontScale - SIZE_STEP)]],
 			["Esc", "close", stop]]
-		: [["←/→", "browse", [prev, next]],
+		: [["←/→", "browse", [prev, next]], ["r", "random", doRandom],
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
 			["n/N", "notes", [() => openNotes(), doNoteAll]],
 			["m", "move", () => openPanel(manageJob("move", current()))],
@@ -2728,6 +2736,21 @@ function build(w) {
 		if (busy || cursor >= ids.length) return;
 		statTick();
 		advance();
+	};
+
+	// Somewhere else in the deck, dealt next. It swaps a card up rather than
+	// jumping the cursor: the count stays honest — "seen" is cards you have
+	// looked at, not how far down the list you landed — and undo and ← still
+	// walk back the order you actually read in.
+	// ponytail: Math.random, not a shuffled deck; ask again and you may get a
+	// card you have had before. A seeded shuffle if that ever grates.
+	const doRandom = () => {
+		if (busy) return;
+		const j = randomAhead(cursor, ids.length);
+		if (j === null) return;
+		const at = cursor + 1;
+		[ids[at], ids[j]] = [ids[j], ids[at]];
+		next();
 	};
 
 	// The file's first page, for the card you are on. It goes back to the
@@ -3642,6 +3665,8 @@ function build(w) {
 				case "p": e.preventDefault(); return doPreview();
 				case "P": e.preventDefault(); return doPreviewAll();
 				case "s": e.preventDefault(); return doDeep();
+				// r reloads the deck on the end screen; on a card it is random.
+				case "r": if (cursor < ids.length) { e.preventDefault(); return doRandom(); } break;
 				default: break;
 			}
 		}
@@ -3776,6 +3801,6 @@ if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
-		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, eatsTail,
+		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead, eatsTail,
 		noteHTML, inlineNote, bankTime, stat, statReset };
 }

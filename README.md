@@ -159,6 +159,13 @@ Subcollections* setting, so a deck holds what its items list holds, and changes
 only this window rather than that setting. An item filed in two subcollections
 is still one card.
 
+<kbd>r</kbd> deals a card from somewhere else in the deck — for a collection
+you are dipping into rather than working through end to end. It swaps that card
+up to be the next one rather than jumping you down the list, so <kbd>←</kbd>
+still walks back the order you actually read in, and the finish count still
+means cards you looked at. Draws are independent, so a long enough sitting will
+hand you one twice.
+
 <kbd>f</kbd>, or the collection's name in the header, switches to another
 collection without leaving the window — the same picker feeds get, fuzzy-matching
 the full path and carrying each collection's item count.
@@ -268,7 +275,7 @@ prose, the math and the chrome together rather than drifting apart.
 curly quotes, and text is held to a readable measure — about 34rem, near the 75
 characters past which the eye starts losing the next line. The window opens at a
 fixed size and stays that shape whatever the item or the font size: 640×760 for
-a feed deck and 930×860 for a collection one, each being what its hint bar needs
+a feed deck and 1020×860 for a collection one, each being what its hint bar needs
 to list every key on one line — measured, not guessed. Resize it and the size is
 remembered, per deck, since the two are not asking for the same window; widen it
 past the column and the text centres rather than hugging the left edge, the way
