@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, noteHTML, bankTime, stat, statReset } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, noteHTML, bankTime, stat, statReset, htmlish } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -359,6 +359,16 @@ assert.strictEqual(noteHTML("costs $5 and $10 a year"), "<p>costs $5 and $10 a y
 assert.strictEqual(noteHTML("`a*b*c` and $a*b*c$"),
 	'<p><code>a*b*c</code> and <span class="math">$a*b*c$</span></p>',
 	"emphasis is not read inside code or maths");
+
+// --- is it markup, or is it a formula? ------------------------------------
+// The HTML parser drops an unclosed tag at the end of its input, so anything
+// handed to it by mistake is not merely mangled, it is gone.
+for (const yes of ["<p>hi</p>", "a <i>word</i>", "AT&amp;T", "&#8212;", "&#x2014;",
+	'<img src="x.png">'])
+	assert.ok(htmlish(yes), `markup: ${yes}`);
+for (const no of ["Hurst index $0<H<1/2$ and more words after it",
+	"$a<b$", "Smith & Jones", "the case $n<\\infty$", "plain prose", ""])
+	assert.ok(!htmlish(no), `not markup: ${no}`);
 
 // --- banking the sitting into Reading Time ---------------------------------
 // The other plugin is optional: absent, declined, or unanswered all mean the
