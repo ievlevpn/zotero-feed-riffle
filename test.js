@@ -196,6 +196,19 @@ assert.strictEqual(C("\\colorbox{red}{x}"), "\\colorbox{red}{x}", "\\colorbox is
 assert.strictEqual(C("\\textcolor{red}{x}"), "\\textcolor{red}{x}", "already unambiguous");
 assert.strictEqual(C("no colour here"), "no colour here");
 
+// --- a bare "#", which MathJax forgives and KaTeX does not ------------------
+const { normalizeTex } = require("./bootstrap.js");
+const T = normalizeTex;
+// The character the author meant. Unescaped, KaTeX reads it as a macro
+// parameter and refuses the whole formula, which then shows as raw source.
+assert.strictEqual(T("\\text{# of $j$-cycles}"), "\\text{\\# of $j$-cycles}");
+assert.strictEqual(T("a \\# b"), "a \\# b", "already escaped");
+// KaTeX's own syntax, and TeX's, both of which have to survive.
+assert.strictEqual(T("\\color{#ff0000}{x}"), "\\textcolor{#ff0000}{x}", "hex colour kept");
+assert.strictEqual(T("\\textcolor{#fff}{x}"), "\\textcolor{#fff}{x}", "short hex kept");
+assert.strictEqual(T("\\def\\f#1{#1+1}"), "\\def\\f#1{#1+1}", "macro parameter kept");
+assert.strictEqual(T("x^2"), "x^2");
+
 
 
 // --- recognising the same work across a feed and the library ---------------

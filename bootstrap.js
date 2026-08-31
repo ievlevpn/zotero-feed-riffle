@@ -553,15 +553,26 @@ function normalizeColor(tex) {
 	return tex.replace(/\\color(?![a-zA-Z])(\s*\{[^{}]*\})\s*\{/g, "\\textcolor$1{");
 }
 
+// MathJax on the arXiv page renders a bare "#" as the character the author
+// meant by it; TeX and KaTeX both read it as a macro parameter and refuse the
+// whole formula, so "\text{# of $j$-cycles}" came out as raw source across the
+// card. Escaping it is what the author should have written.
+// Two hashes are not that character and must survive: the one opening a hex
+// colour, which is KaTeX's own syntax, and a real macro parameter, in the \def
+// a feed occasionally carries. Exported for test.js.
+function normalizeTex(tex) {
+	return normalizeColor(tex).replace(/(?<!\\)#(?![0-9A-Fa-f]{3,8}\b|\d)/g, "\\#");
+}
+
 // One formula, typeset into `parent`.
 function mathInto(doc, parent, tex, display) {
 	if (katexLib) {
 		// throwOnError keeps one bad formula from taking out the card: KaTeX
 		// renders what it can and marks the rest. trust:false refuses \href and
 		// friends — this is a feed, and it does not get to inject links.
-		// KaTeX's own \color stays a switch, as LaTeX specifies; normalizeColor
+		// KaTeX's own \color stays a switch, as LaTeX specifies; normalizeTex
 		// has already turned the argument form into \textcolor above.
-		const html = safe(() => katexLib.renderToString(normalizeColor(tex), {
+		const html = safe(() => katexLib.renderToString(normalizeTex(tex), {
 			displayMode: !!display, throwOnError: false, strict: false, trust: false,
 		}), null);
 		const frag = html && katexFragment(doc, html);
@@ -3764,7 +3775,7 @@ function uninstall() {}
 if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
-		looksLikeMath, normalizeColor, refKeys, markClassMath, foldLibraryRows,
+		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, eatsTail,
 		noteHTML, inlineNote, bankTime, stat, statReset };
 }
