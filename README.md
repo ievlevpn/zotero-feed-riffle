@@ -35,6 +35,7 @@ Each card shows the title, authors, date and abstract.
 | <kbd>o</kbd> | open the paper in your browser |
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
 | <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> | text bigger, smaller, reset (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> too) |
+| <kbd>?</kbd> | help and settings — every key, and what to remember between sittings |
 | <kbd>Esc</kbd> | close |
 
 Three outcomes, not two. <kbd>←</kbd> discards, <kbd>→</kbd> files, and
@@ -104,6 +105,32 @@ where <kbd>Enter</kbd> files and
 moves back a row and <kbd>Esc</kbd> steps back one at a time; either way the row
 you return to opens its own fuzzy list again.
 
+## Help and settings
+
+<kbd>?</kbd> pulls down a sheet with every key on it, and the handful of
+settings underneath. The hint bar along the bottom carries the keys you reach
+for all day; the ones you do not — <kbd>o</kbd>, <kbd>+</kbd>/<kbd>−</kbd>, and
+<kbd>s</kbd> on a collection deck — live only here, listed rather than taking a
+slot on a line you read past a thousand times. They are still buttons: clicking
+one puts the sheet away and does the thing.
+
+The settings are the three choices you would otherwise make again every time
+the window opens:
+
+| | |
+|---|---|
+| **Open cards on the page, not the description** | what <kbd>Shift</kbd>+<kbd>P</kbd> does, from the start — for a collection of papers you read rather than abstracts you skim |
+| **Include subcollections** | what <kbd>s</kbd> does, from the start. Untouched, it still follows Zotero's own *Show Items from Subcollections* |
+| **Log sittings to Reading Time** | the question the finish screen asks once, answerable before it asks. Only shown when Reading Time is installed |
+| **Show the finish summary** | the same switch the finish screen carries, in the place you would look for it |
+
+Each takes effect on the deck you are in, not just the next one — a default you
+can only see work tomorrow is one you cannot tell you have set. Turning
+subcollections on redeals the deck, so the sheet closes as it does.
+
+The first two are collection settings and the third is a feed one, so the sheet
+shows what the deck you are in can actually use.
+
 ## Riffling a collection
 
 Right-click a collection → **Riffle This Collection…** deals its items out the
@@ -155,16 +182,20 @@ pay for a megabyte of module.
 <kbd>s</kbd> takes in what is filed below the collection as well, so a parent
 with six subcollections deals one deck rather than seven; the header says
 *+ subcollections* while it does. It starts from Zotero's own *Show Items from
-Subcollections* setting, so a deck holds what its items list holds, and changes
-only this window rather than that setting. An item filed in two subcollections
+Subcollections* setting until you set your own under <kbd>?</kbd>, so a deck
+holds what its items list holds, and <kbd>s</kbd> changes only this window
+rather than either setting. An item filed in two subcollections
 is still one card.
 
 <kbd>r</kbd> deals a card from somewhere else in the deck — for a collection
 you are dipping into rather than working through end to end. It swaps that card
 up to be the next one rather than jumping you down the list, so <kbd>←</kbd>
 still walks back the order you actually read in, and the finish count still
-means cards you looked at. Draws are independent, so a long enough sitting will
-hand you one twice.
+means cards you looked at. The card comes from what you have not been dealt yet,
+so pressing it down the deck never hands you the same one twice — it is one
+shuffle dealt a card at a time, not a die rolled at each press. Stepping back
+with <kbd>←</kbd> first puts that card back in play, which is the point of
+stepping back.
 
 <kbd>f</kbd>, or the collection's name in the header, switches to another
 collection without leaving the window — the same picker feeds get, fuzzy-matching
@@ -175,8 +206,9 @@ and *5 changed · 1 trashed · 12 min*.
 
 ## How it stores things
 
-Nothing of its own, beyond remembering the last collection and the window
-position.
+Nothing of its own, beyond remembering the last collection, the window position
+and the four settings under <kbd>?</kbd> — Zotero prefs under `feedRiffle.`,
+which is where uninstalling leaves them and where they can be read off.
 
 *Discarded* is Zotero's own per-item read flag — the same one the unread
 counts in the collections pane use, and the one Zotero's existing feed cleanup
@@ -275,8 +307,11 @@ prose, the math and the chrome together rather than drifting apart.
 curly quotes, and text is held to a readable measure — about 34rem, near the 75
 characters past which the eye starts losing the next line. The window opens at a
 fixed size and stays that shape whatever the item or the font size: 640×760 for
-a feed deck and 1020×860 for a collection one, each being what its hint bar needs
-to list every key on one line — measured, not guessed. Resize it and the size is
+a feed deck and 1020×860 for a collection one, each being what its hint bar
+needed to list every key on one line when it was measured. The bar has since
+given its rarer keys to <kbd>?</kbd> and has slack; the sizes stay, because a
+window that shrinks under people who have got used to it is worse than one with
+room in the bar. Resize it and the size is
 remembered, per deck, since the two are not asking for the same window; widen it
 past the column and the text centres rather than hugging the left edge, the way
 a reader should. Descriptions are set in a serif, which is what

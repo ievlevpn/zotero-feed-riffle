@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, randomAhead, noteHTML, bankTime, stat, statReset, eatsTail } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, prefOn, noteHTML, bankTime, stat, statReset, eatsTail } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -377,6 +377,35 @@ for (let i = 0; i < 200; i++) {
 	const j = randomAhead(2, 10);
 	assert.ok(j >= 3 && j <= 9, "stays ahead of the cursor and inside the deck");
 }
+
+// Swapping the pick up to cursor+1 and stepping on is Fisher-Yates dealt one
+// card at a time: a whole run is a permutation, so no card comes round twice.
+for (let trial = 0; trial < 200; trial++) {
+	const deck = [0, 1, 2, 3, 4, 5, 6, 7];
+	const dealt = [deck[0]];
+	for (let cursor = 0; ; cursor++) {
+		const j = randomAhead(cursor, deck.length);
+		if (j === null) break;
+		const at = cursor + 1;
+		[deck[at], deck[j]] = [deck[j], deck[at]];
+		dealt.push(deck[at]);
+	}
+	assert.deepStrictEqual([...dealt].sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 6, 7],
+		"every card dealt exactly once");
+}
+// And every card can reach every position, so it is a shuffle, not a rotation.
+const seen = new Set();
+for (let trial = 0; trial < 2000; trial++) {
+	const deck = [0, 1, 2, 3];
+	for (let cursor = 0; ; cursor++) {
+		const j = randomAhead(cursor, deck.length);
+		if (j === null) break;
+		const at = cursor + 1;
+		[deck[at], deck[j]] = [deck[j], deck[at]];
+	}
+	seen.add(deck.join(""));
+}
+assert.strictEqual(seen.size, 6, "all 3! orders of the tail turn up");
 assert.strictEqual(noteHTML("one\ntwo <b> & three"),
 	"<p>one</p><p>two &lt;b&gt; &amp; three</p>", "a typed note is text, never markup");
 
@@ -453,6 +482,21 @@ assert.deepStrictEqual(banked, [[900, stat.began, null]], "accepted: one row, in
 assert.ok(stat.banked, "and it is not written twice");
 bankTime();
 assert.strictEqual(banked.length, 1);
+
+// --- prefOn: never set is not the same as set to false ---------------------
+// The three settings in the help sheet lean on this: unset means "follow
+// Zotero" for subcollections and "ask me once" for Reading Time, and reading
+// either as a plain false would silently answer a question nobody had.
+let prefs = {};
+const realGet = global.Zotero.Prefs.get;
+global.Zotero.Prefs.get = (k) => prefs[k];
+assert.strictEqual(prefOn("x", true), true, "unset falls back to the default");
+assert.strictEqual(prefOn("x", false), false, "whichever the default is");
+prefs = { x: false };
+assert.strictEqual(prefOn("x", true), false, "an explicit false beats the default");
+prefs = { x: true };
+assert.strictEqual(prefOn("x", false), true, "and so does an explicit true");
+global.Zotero.Prefs.get = realGet;
 
 // A note typed on the end screen rides along on the same row.
 banked.length = 0;

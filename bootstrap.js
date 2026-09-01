@@ -20,6 +20,8 @@ const RECENT_PREF = "feedRiffle.recentCollections"; // most recently filed into
 const DECK_PREF = "feedRiffle.lastDeck";       // collection id last riffled
 const STATS_PREF = "feedRiffle.summary";       // false: the finish summary stays off
 const RT_PREF = "feedRiffle.readingTime";      // unset: ask once; then true or false
+const PAGES_PREF = "feedRiffle.pagesFirst";    // a collection deck opens on pages, not text
+const DEEP_PREF = "feedRiffle.subcollections"; // unset: follow Zotero's own View setting
 const RECENT_MAX = 9; // as many as there are number keys
 const BASE_PX = 15;   // reading size at scale 1, before Zotero's own setting
 // The text column, and the card's side padding, in rem. The stylesheet and the
@@ -53,7 +55,7 @@ const DROP_CAP = 60; // rows drawn in a picker dropdown
 // screen itself offers get through; the arrows are handled before this and put
 // you back on the card.
 const END_KEYS = new Set(["Escape", "Enter", "ArrowUp", "ArrowDown", " ",
-	"u", "n", "+", "=", "-", "_", "0"]);
+	"u", "n", "+", "=", "-", "_", "0", "?", "/"]);
 
 let menuID = null;
 let feedMenuID = null;
@@ -105,6 +107,13 @@ function statTick() {
 }
 
 const summaryOn = () => safe(() => Zotero.Prefs.get(STATS_PREF) !== false, true);
+
+// A setting that has never been touched is not false, it is unset — which is
+// how "follow Zotero" and "ask me once" stay tellable from "no".
+const prefOn = (key, dflt) => safe(() => {
+	const v = Zotero.Prefs.get(key);
+	return v === undefined ? dflt : !!v;
+}, dflt);
 
 // --- Reading Time ----------------------------------------------------------
 //
@@ -1677,16 +1686,39 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .bar { border-top:1px solid color-mix(in srgb, GrayText 35%, Canvas);
 	padding:.5rem 1.1rem; display:flex; flex-wrap:wrap; gap:.35rem .65rem;
 	font-size:.75rem; color:GrayText; }
-.bar kbd { font:.72rem ui-monospace, monospace; padding:.05em .4em; border-radius:4px;
+.bar kbd, .sheet kbd { font:.72rem ui-monospace, monospace; padding:.05em .4em;
+	border-radius:4px;
 	border:1px solid color-mix(in srgb, GrayText 45%, Canvas);
 	background:color-mix(in srgb, GrayText 14%, Canvas); color:CanvasText; }
 /* A hint that names a key you can also click. The key itself lights up, so a
  * "+ / −" pair still reads as two buttons rather than one. */
-.bar .hit { cursor:pointer; }
-.bar .hit:hover { color:CanvasText; }
-.bar .hit:hover > kbd, .bar kbd.hit:hover {
+.bar .hit, .sheet .hit { cursor:pointer; }
+.bar .hit:hover, .sheet .hit:hover { color:CanvasText; }
+.bar .hit:hover > kbd, .bar kbd.hit:hover,
+.sheet .hit:hover > kbd, .sheet kbd.hit:hover {
 	border-color:color-mix(in srgb, Highlight 60%, Canvas);
 	background:color-mix(in srgb, Highlight 22%, Canvas); }
+
+/* Help and settings. Anchored where the feed picker is because it is the same
+ * kind of thing — a panel you pull down from the header — but the full width
+ * of it, since a key list in one column is a scroll rather than a glance. */
+.sheet { position:absolute; top:calc(100% + .3rem); left:.75rem; right:.75rem;
+	z-index:20; max-height:min(32rem, 76vh); overflow-y:auto;
+	padding:.75rem .9rem .85rem; background:Canvas; border-radius:7px;
+	border:1px solid color-mix(in srgb, GrayText 45%, Canvas);
+	box-shadow:0 6px 22px rgba(0,0,0,.3);
+	font-size:.75rem; color:GrayText; }
+.sheet:focus { outline:none; }
+.sheet h2 { font-size:.68rem; letter-spacing:.05em; text-transform:uppercase;
+	font-weight:600; color:GrayText; margin:0 0 .5rem; }
+.sheet .keys + h2 { margin-top:1.1rem; }
+/* As many columns as fit, so the same list reads at any window width. */
+.sheet .keys { display:grid; gap:.4rem .9rem;
+	grid-template-columns:repeat(auto-fill, minmax(11rem, 1fr)); }
+.sheet .sets { display:flex; flex-direction:column; }
+.sheet .srow { display:flex; align-items:baseline; gap:.6rem; padding:.1rem 0; }
+.sheet .srow span { flex:1; min-width:0; }
+.sheet .srow .quiet { font-variant-numeric:tabular-nums; }
 
 /* The filing panel replaces the hint bar rather than floating over the card:
  * you keep reading the description while you decide where it goes. */
@@ -1963,7 +1995,9 @@ function openCollection(collectionID) {
 	mode = "collection";
 	scopeColl = collectionID;
 	scopeLib = null;
-	deep = safe(() => !!Zotero.Prefs.get("recursiveCollections"), false);
+	// Zotero's own View setting until you say otherwise in the help sheet, so a
+	// deck holds what the items list holds for anyone who never opens it.
+	deep = prefOn(DEEP_PREF, safe(() => !!Zotero.Prefs.get("recursiveCollections"), false));
 	return openWindow();
 }
 
@@ -2160,6 +2194,95 @@ function build(w) {
 		input.focus();
 	};
 
+	// Help and settings, in the same slot as the feed picker and held in the
+	// same `menu`: one thing is open over the header at a time, the card keys
+	// go quiet while it is, and clicking away closes it — all of which the
+	// picker already arranged for. What is in it is the keys the bar no longer
+	// carries, and the settings worth remembering between sittings — only the
+	// ones the deck you are in can use, since the rest would be furniture.
+	const openHelp = () => {
+		if (menu) return closeFeeds();
+		menu = el(doc, "div", "sheet");
+		menu.tabIndex = -1;
+
+		const keys = el(doc, "div", "keys");
+		// A key listed here is still a key you can press: clicking it puts the
+		// sheet away first, since most of them act on the card behind it.
+		const andClose = (act) => Array.isArray(act)
+			? act.map((f) => f && (() => { closeFeeds(); f(); }))
+			: act && (() => { closeFeeds(); act(); });
+		hintInto(keys, keyList()
+			.filter((k) => k[3] !== "bar")
+			.map(([k, what, act]) => [k, what, andClose(act)]));
+
+		// Live, not just remembered: a default you can only see take effect
+		// next time is a default you cannot tell you have set.
+		const rows = el(doc, "div", "sets");
+		const toggle = (label, get, set) => {
+			const b = el(doc, "button", "quiet", get() ? "On" : "Off");
+			b.addEventListener("mousedown", (e) => {
+				e.preventDefault();
+				set(!get());
+				b.textContent = get() ? "On" : "Off";
+			});
+			const row = el(doc, "div", "srow");
+			row.append(el(doc, "span", null, label), b);
+			rows.append(row);
+		};
+		if (isFeedMode()) {
+			// Only where there is somewhere to log to. Answering here is the
+			// same answer the end screen asks for, so it stops asking.
+			if (readingTime()) {
+				toggle("Log sittings to Reading Time", () => rtAnswer() === true,
+					(on) => safe(() => Zotero.Prefs.set(RT_PREF, on)));
+			}
+		}
+		else {
+			toggle("Open cards on the page, not the description",
+				() => previewAll,
+				(on) => {
+					safe(() => Zotero.Prefs.set(PAGES_PREF, on));
+					if (on !== previewAll) doPreviewAll();
+				});
+			// This one redeals the deck, and redealing rebuilds the window
+			// from the body down — so the sheet goes away first, the way the
+			// feed picker does before it switches decks. The flash says it
+			// took. The other toggle only redraws a card, so it can stay.
+			toggle("Include subcollections",
+				() => deep,
+				(on) => {
+					safe(() => Zotero.Prefs.set(DEEP_PREF, on));
+					if (on === deep) return;
+					closeFeeds();
+					doDeep();
+				});
+		}
+		toggle("Show the finish summary", summaryOn,
+			(on) => safe(() => Zotero.Prefs.set(STATS_PREF, on)));
+
+		menu.append(el(doc, "h2", null, "Keys"), keys,
+			el(doc, "h2", null, "Settings"), rows);
+		head.append(menu);
+
+		menu.addEventListener("keydown", (e) => {
+			e.stopPropagation();
+			if (e.key === "Escape" || e.key === "?" || e.key === "/") {
+				e.preventDefault();
+				closeFeeds();
+			}
+		});
+		// Clicking away closes it — but not into the hint bar, which is where
+		// the ? that opens it lives. Dismissing there would swallow the click
+		// and reopen on the next line down, so the button would never close
+		// the sheet. The other hints keep working with it up, which is what a
+		// button on screen ought to do.
+		menu._onDown = (e) => {
+			if (!menu.contains(e.target) && !bar.contains(e.target)) closeFeeds();
+		};
+		doc.addEventListener("mousedown", menu._onDown, true);
+		menu.focus();
+	};
+
 	feedName.addEventListener("click", openFeeds);
 
 	const cardBox = el(doc, "div", "card");
@@ -2226,7 +2349,7 @@ function build(w) {
 	let ending = false; // showing the summary on the way out
 	let previewAtt = 0; // the attachment it is for, so a late one can be dropped
 	let previewing = false; // p, and only for the card you pressed it on
-	let previewAll = false; // P: pages rather than descriptions, until told otherwise
+	let previewAll = prefOn(PAGES_PREF, false); // P: pages rather than descriptions
 	let noteAll = false;    // N: the notes stay open and follow the deck
 	let shutPanel = null;   // closes whatever panel is open, from outside it
 	let followID = null;    // the card the open panel is following, under N
@@ -2253,8 +2376,8 @@ function build(w) {
 		node.classList.add("hit");
 		node.addEventListener("mousedown", (e) => { e.preventDefault(); fn(); });
 	};
-	const hint = (triples) => {
-		bar.replaceChildren();
+	const hintInto = (node, triples) => {
+		node.replaceChildren();
 		for (const [k, what, act] of triples) {
 			const span = el(doc, "span");
 			const many = Array.isArray(act);
@@ -2266,32 +2389,43 @@ function build(w) {
 			});
 			span.append(" " + what);
 			if (act && !many) arm(span, act);
-			bar.append(span);
+			node.append(span);
 		}
 	};
+	const hint = (triples) => hintInto(bar, triples);
 
 	// The numbers file into recent collections without the panel; clicking that
 	// hint opens the panel, which is where those same collections are listed.
-	// Every key the card answers to, on one line — which is what the window is
-	// sized to hold rather than the other way round.
-	const cardHints = () => hint(isFeedMode()
+	// Every key the card answers to, in one list read two ways: the bar carries
+	// the ones you reach for all day, and ? has the rest. A fourth element says
+	// which — `true` for keys that live only in the sheet, "bar" for the one
+	// that opens it. The bar is still what the window is sized to hold.
+	const sized = () => [() => setScale(fontScale + SIZE_STEP),
+		() => setScale(fontScale - SIZE_STEP)];
+	const keyList = () => (isFeedMode()
 		? [["←", "discard", doDiscard], ["→", "keep", () => openPanel()],
 			["s", "skip", doSkip], ["u", "undo", doUndo],
 			["1–9", "recent", () => openPanel()], ["f", "feed", openFeeds],
-			["o", "open", openURL],
-			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
-				() => setScale(fontScale - SIZE_STEP)]],
+			["o", "open", openURL, true],
+			["+/−", "size", sized(), true],
+			["0", "reset size", () => setScale(1), true],
+			["↑/↓/Space", "scroll", null, true],
+			["?", "help", openHelp, "bar"],
 			["Esc", "close", stop]]
 		: [["←/→", "browse", [prev, next]], ["r", "random", doRandom],
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
 			["n/N", "notes", [() => openNotes(), doNoteAll]],
 			["m", "move", () => openPanel(manageJob("move", current()))],
 			["x", "trash", doTrash], ["p/P", "page", [doPreview, doPreviewAll]],
-			["u", "undo", doUndo], ["s", "subcollections", doDeep],
-			["f", "switch", openFeeds], ["o", "open", openURL],
-			["+/−", "size", [() => setScale(fontScale + SIZE_STEP),
-				() => setScale(fontScale - SIZE_STEP)]],
+			["u", "undo", doUndo],
+			["s", "subcollections", doDeep, true],
+			["f", "switch", openFeeds], ["o", "open", openURL, true],
+			["+/−", "size", sized(), true],
+			["0", "reset size", () => setScale(1), true],
+			["↑/↓/Space", "scroll", null, true],
+			["?", "help", openHelp, "bar"],
 			["Esc", "close", stop]]);
+	const cardHints = () => hint(keyList().filter((k) => k[3] !== true));
 
 	// --- the card ---------------------------------------------------------
 
@@ -2742,8 +2876,10 @@ function build(w) {
 	// jumping the cursor: the count stays honest — "seen" is cards you have
 	// looked at, not how far down the list you landed — and undo and ← still
 	// walk back the order you actually read in.
-	// ponytail: Math.random, not a shuffled deck; ask again and you may get a
-	// card you have had before. A seeded shuffle if that ever grates.
+	// No card twice: the pick is always from beyond the cursor, so a run of r
+	// is Fisher-Yates dealt one card at a time rather than a die rolled anew
+	// each press. Stepping back with ← is the one way to be dealt one again,
+	// which is what stepping back asks for.
 	const doRandom = () => {
 		if (busy) return;
 		const j = randomAhead(cursor, ids.length);
@@ -3681,6 +3817,8 @@ function build(w) {
 			case "0": e.preventDefault(); setScale(1); break;
 			case "o": e.preventDefault(); openURL(); break;
 			case "f": e.preventDefault(); openFeeds(); break;
+			// Shift is not always where ? is; / is the key under it either way.
+			case "?": case "/": e.preventDefault(); openHelp(); break;
 			case "r": if (cursor >= ids.length) { e.preventDefault(); reload().catch(oops); } break;
 			case "Escape": e.preventDefault(); (ending ? w.close() : stop()); break;
 			case "Enter":
@@ -3801,6 +3939,7 @@ if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
-		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead, eatsTail,
+		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
+		prefOn, eatsTail,
 		noteHTML, inlineNote, bankTime, stat, statReset };
 }
