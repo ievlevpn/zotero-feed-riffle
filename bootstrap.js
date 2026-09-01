@@ -43,6 +43,7 @@ const COLL_W = 1020;
 const OLD_COLL_W = [810, 930, 960];  // defaults from before the bar grew
 const COLL_H = 860;
 const SIZE_MIN = 0.7, SIZE_MAX = 2.4, SIZE_STEP = 0.08;
+const CHUNK = 10;   // cards a shifted arrow covers on a collection deck
 const AHEAD = 25;   // items hydrated ahead of the cursor
 const BEHIND = 50;  // and kept behind it, so undo does not have to refetch
 // A formula longer than this is not a formula: a delimiter was mis-detected and
@@ -69,6 +70,7 @@ let colls = [];        // [{ id, path }] every collection you can file into
 let collRows = [];     // the same, with counts, for the picker on a collection deck
 let allTags = [];      // every tag name in the library, for the tag picker
 let undoStack = [];    // {id, revert} — revert absent for a discard or a skip
+let deckTitles = null; // itemID → title for the whole deck, read on the first g
 let scopeLib = null;   // feed libraryID to riffle, or null for every feed
 let scopeColl = null;  // collection id to riffle instead, when riffling one
 // Which deck is on screen. Everything around the cards — the window, the
@@ -841,12 +843,12 @@ function splitMath(text) {
 }
 
 // "Pabst, Hofert, Schötz" — but stop before the list eats the card.
-function authorLine(creators, max = 8) {
+function authorLine(creators, max = 8, sep = " · ") {
 	const names = creators.map((c) => deLatex(
 		c.fieldMode === 1 ? c.lastName : [c.firstName, c.lastName].filter(Boolean).join(" ")
 	).trim()).filter(Boolean);
-	if (names.length <= max) return names.join(" · ");
-	return names.slice(0, max).join(" · ") + " · +" + (names.length - max) + " more";
+	if (names.length <= max) return names.join(sep);
+	return names.slice(0, max).join(sep) + sep + "+" + (names.length - max) + " more";
 }
 
 // Zotero dates are multipart ("2026-08-26 2026-08-26 04:00:00"); the leading
@@ -854,6 +856,24 @@ function authorLine(creators, max = 8) {
 function shortDate(d) {
 	const m = (d || "").match(/\d{4}-\d{2}-\d{2}|\d{4}/);
 	return m ? m[0] : (d || "").trim();
+}
+
+// What there is to copy off a card, most likely first. A feed fills in whatever
+// it feels like, so a field that is not there is no row rather than an empty
+// one — a menu of five things you can actually paste beats one of nine where
+// four do nothing. Exported for test.js.
+function copyChoices({ title, authors, year, doi, url, abstract }) {
+	const out = [];
+	const ref = [authors, year && "(" + year + ")", title].filter(Boolean).join(" ");
+	if (ref) out.push({ name: "Reference", text: /[.!?]$/.test(ref) ? ref : ref + "." });
+	// One link row, not two: the item's own URL when it has one, and the DOI
+	// resolver when that is all there is. The bare DOI gets its own row below.
+	const link = url || (doi && "https://doi.org/" + doi);
+	if (link) out.push({ name: "Link", text: link });
+	if (doi) out.push({ name: "DOI", text: doi });
+	if (title) out.push({ name: "Title", text: title });
+	if (abstract) out.push({ name: "Abstract", text: abstract });
+	return out;
 }
 
 // Split a tag box into finished tags. Commas end a tag; the trailing fragment
@@ -1074,6 +1094,23 @@ function libraryCopy(feedItem) {
 		if (hit) return hit;
 	}
 	return null;
+}
+
+// Every title in the deck, for the jump box — one query rather than hydrating
+// two thousand items to read one field off each, which is the whole reason the
+// deck hydrates a window at a time. Read on the first g and not before.
+// ponytail: the plain `title` field, so an item type that keeps its title
+// somewhere else (a case, a statute) shows as untitled. getFieldIDFromTypeAndBase
+// per type if a deck of those ever turns up.
+async function loadDeckTitles(want) {
+	const out = new Map();
+	if (!want.length) return out;
+	const sql = "SELECT d.itemID AS id, v.value AS title FROM itemData d "
+		+ "JOIN itemDataValues v ON v.valueID = d.valueID "
+		+ "WHERE d.fieldID = (SELECT fieldID FROM fields WHERE fieldName = 'title') "
+		+ "AND d.itemID IN (" + want.map((n) => Number(n) | 0).join(",") + ")";
+	for (const r of (await Zotero.DB.queryAsync(sql)) || []) out.set(r.id, r.title);
+	return out;
 }
 
 // How many items each collection holds — regular items, nothing in the trash,
@@ -1497,7 +1534,11 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .drop div { display:flex; align-items:baseline; gap:.6rem; }
 .drop div span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
 .drop b { font-weight:400; font-size:.78em; color:GrayText;
-	font-variant-numeric:tabular-nums; }
+	font-variant-numeric:tabular-nums;
+	/* An unread count is three characters; the copy menu's preview of what it
+	 * would put in the clipboard is a line of prose. Half the row, then ellipsis
+	 * — the name on the left is what you are picking by. */
+	max-width:55%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .drop div.on b { color:HighlightText; }
 .head .count { margin-left:auto; font-size:.74rem; color:GrayText;
 	white-space:nowrap; font-variant-numeric:tabular-nums; }
@@ -2074,6 +2115,7 @@ async function reload() {
 		cache.clear();
 		attachments.clear();
 		undoStack = [];
+		deckTitles = null;
 		colls = flatCollections();
 		// Only the deck that offers them pays for the counts.
 		if (isFeedMode()) collRows = [];
@@ -2118,54 +2160,56 @@ function build(w) {
 		w.focus();
 	};
 
-	// The same list either way: what else this window could be riffling. Feeds
-	// carry what is unread in them, collections what is in them.
-	const openFeeds = () => {
-		if (menu) return closeFeeds();
-		const feed = isFeedMode();
-		const rows = feed ? feedRows() : collRows;
-		if (rows.length < 2) return flash(feed ? "No feeds" : "No collections");
+	// One dropdown, four uses: the feed and collection switcher, the copy list
+	// and the jump-to-a-card box. They are all the same gesture — a filtered
+	// list under the header that Enter picks from — so they are one widget, and
+	// each caller says only what is in the list and what picking does.
+	// `rows` are { name, n } and `n` is the trailing figure, or null for none.
+	const pickMenu = ({ placeholder, rows, sel, empty, onPick }) => {
 		menu = el(doc, "div", "feedpick");
 		const input = doc.createElement("input");
 		input.type = "text";
-		input.placeholder = feed ? "Search feeds…" : "Search collections…";
+		input.placeholder = placeholder;
 		const drop = el(doc, "div", "drop");
 		menu.append(input, drop);
 		head.append(menu);
 
-		let shown = rows;
-		// Opens on whichever one you are already riffling.
-		const here = feed ? scopeLib : scopeColl;
-		let sel = Math.max(0, rows.findIndex((r) => r.id === here));
+		// rank("") is the cap as much as the order: a deck of two thousand cards
+		// would otherwise draw two thousand rows on open.
+		// ponytail: past the cap the opening selection lands on the last row
+		// drawn rather than the one you are on — you type to find it anyway.
+		let shown = rank("", rows);
+		let at = Math.min(Math.max(0, sel || 0), Math.max(0, shown.length - 1));
 
 		const paint = () => {
 			drop.replaceChildren();
 			if (!shown.length) {
-				drop.append(el(doc, "div", "none",
-					feed ? "No matching feed" : "No matching collection"));
+				drop.append(el(doc, "div", "none", empty));
 				return;
 			}
 			shown.forEach((r, i) => {
-				const row = el(doc, "div", i === sel ? "on" : null);
+				const row = el(doc, "div", i === at ? "on" : null);
 				row.append(el(doc, "span", null, r.name),
-					el(doc, "b", null, r.n === null ? "" : String(r.n)));
-				row.addEventListener("mousedown", (e) => { e.preventDefault(); sel = i; choose(); });
+					el(doc, "b", null, r.n == null ? "" : String(r.n)));
+				row.addEventListener("mousedown", (e) => {
+					e.preventDefault();
+					at = i;
+					choose();
+				});
 				drop.append(row);
 			});
 			const on = drop.querySelector(".on");
 			if (on) on.scrollIntoView({ block: "nearest" });
 		};
 
+		// The menu goes before the action runs: everything it can do acts on the
+		// window behind it, and one of them rebuilds that window from the body
+		// down, which would strand this one's listener on the document.
 		const choose = () => {
-			const r = shown[sel];
+			const r = shown[at];
+			if (!r) return;
 			closeFeeds();
-			if (!r || r.id === here) return;
-			if (feed) scopeLib = r.id;
-			else {
-				scopeColl = r.id;
-				safe(() => Zotero.Prefs.set(DECK_PREF, String(r.id)));
-			}
-			reload().catch(oops);
+			onPick(r);
 		};
 
 		menu.addEventListener("keydown", (e) => {
@@ -2174,14 +2218,14 @@ function build(w) {
 			if (e.key === "ArrowDown" || e.key === "ArrowUp") {
 				e.preventDefault(); e.stopPropagation();
 				if (!shown.length) return;
-				sel = (sel + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length;
+				at = (at + (e.key === "ArrowDown" ? 1 : -1) + shown.length) % shown.length;
 				return paint();
 			}
 			e.stopPropagation(); // ordinary typing stays in the box
 		});
 		input.addEventListener("input", () => {
 			shown = rank(input.value, rows, (r) => r.name);
-			sel = 0;
+			at = 0;
 			paint();
 		});
 		// Clicking anywhere else dismisses it, the way a menu should.
@@ -2192,6 +2236,96 @@ function build(w) {
 
 		paint();
 		input.focus();
+	};
+
+	// The same list either way: what else this window could be riffling. Feeds
+	// carry what is unread in them, collections what is in them.
+	const openFeeds = () => {
+		if (menu) return closeFeeds();
+		const feed = isFeedMode();
+		const rows = feed ? feedRows() : collRows;
+		if (rows.length < 2) return flash(feed ? "No feeds" : "No collections");
+		const here = feed ? scopeLib : scopeColl;
+		pickMenu({
+			placeholder: feed ? "Search feeds…" : "Search collections…",
+			rows,
+			// Opens on whichever one you are already riffling.
+			sel: rows.findIndex((r) => r.id === here),
+			empty: feed ? "No matching feed" : "No matching collection",
+			onPick: (r) => {
+				if (r.id === here) return;
+				if (feed) scopeLib = r.id;
+				else {
+					scopeColl = r.id;
+					safe(() => Zotero.Prefs.set(DECK_PREF, String(r.id)));
+				}
+				reload().catch(oops);
+			},
+		});
+	};
+
+	// Something off this card, in the clipboard. Which thing is a menu rather
+	// than a guess: a link, a reference line and the DOI are wanted about
+	// equally often, and picking from five rows is faster than a key each.
+	const openCopy = () => {
+		if (menu) return closeFeeds();
+		const item = current();
+		if (!item) return;
+		const rows = copyChoices({
+			title: deLatex(safe(() => item.getField("title"), "") || ""),
+			authors: authorLine(safe(() => item.getCreators(), []) || [], 8, ", "),
+			year: shortDate(safe(() => item.getField("date"), "") || "").slice(0, 4),
+			doi: safe(() => item.getField("DOI"), "") || "",
+			url: safe(() => item.getField("url"), "") || "",
+			abstract: splitAbstract(safe(() => item.getField("abstractNote"), "")).body,
+		}).map((c) => ({ ...c, n: oneLine(c.text) }));
+		if (!rows.length) return flash("Nothing on this card to copy");
+		pickMenu({
+			placeholder: "Copy…",
+			rows,
+			empty: "No matching field",
+			onPick: (r) => {
+				const ok = safe(() => {
+					Zotero.Utilities.Internal.copyTextToClipboard(r.text);
+					return true;
+				}, false);
+				flash(ok ? "Copied the " + r.name.toLowerCase()
+					: "Could not reach the clipboard");
+			},
+		});
+	};
+
+	// Somewhere in the deck by name, rather than by pressing → until it turns
+	// up. The titles are one query on the first press and then kept, so a deck
+	// you never jump in never pays for them.
+	const openJump = () => {
+		if (menu) return closeFeeds();
+		if (!ids.length) return flash("Nothing to jump to");
+		// The array itself, not a copy: reload() replaces it, so identity is an
+		// exact "is this still the same deck" — while a trash or a move, which
+		// splice it in place, leave both the titles and the places right.
+		const deck = ids;
+		const show = (titles) => {
+			// Opened something else, or redealt, while the titles were read.
+			if (menu || ids !== deck) return;
+			pickMenu({
+				placeholder: "Jump to…",
+				rows: deck.map((id, i) => ({
+					at: i,
+					name: titles.get(id) || "(untitled)",
+					n: i + 1,
+				})),
+				sel: cursor,
+				empty: "No matching card",
+				onPick: (r) => jump(r.at),
+			});
+		};
+		if (deckTitles) return show(deckTitles);
+		loadDeckTitles(deck).then((titles) => {
+			if (ids !== deck) return;  // a redeal already cleared the cache
+			deckTitles = titles;
+			show(titles);
+		}).catch((e) => { oops(e); flash("Could not read the deck's titles"); });
 	};
 
 	// Help and settings, in the same slot as the feed picker and held in the
@@ -2360,6 +2494,13 @@ function build(w) {
 		return p.finally(() => { busy = false; noteFollow(); });
 	};
 
+	// A row in the copy menu says what it would put in the clipboard, on one
+	// line — an abstract is a paragraph, and the menu is a menu.
+	const oneLine = (text) => {
+		const one = String(text).replace(/\s+/g, " ").trim();
+		return one.length > 52 ? one.slice(0, 51) + "…" : one;
+	};
+
 	const flash = (text) => {
 		const f = el(doc, "div", "flash", text);
 		doc.body.append(f);
@@ -2407,19 +2548,28 @@ function build(w) {
 			["s", "skip", doSkip], ["u", "undo", doUndo],
 			["1–9", "recent", () => openPanel()], ["f", "feed", openFeeds],
 			["o", "open", openURL, true],
+			["O", "show in library", showInLibrary, true],
+			["c", "copy…", openCopy, true],
 			["+/−", "size", sized(), true],
 			["0", "reset size", () => setScale(1), true],
 			["↑/↓/Space", "scroll", null, true],
 			["?", "help", openHelp, "bar"],
 			["Esc", "close", stop]]
 		: [["←/→", "browse", [prev, next]], ["r", "random", doRandom],
+			["⇧←/⇧→", "jump " + CHUNK,
+				[() => jump(cursor - CHUNK), () => jump(cursor + CHUNK)], true],
+			["Home/End", "ends", [() => jump(0), () => jump(ids.length - 1)], true],
 			["t", "tags", () => openPanel(manageJob("tags", current()))],
 			["n/N", "notes", [() => openNotes(), doNoteAll]],
 			["m", "move", () => openPanel(manageJob("move", current()))],
+			["a", "add to", () => openPanel(manageJob("add", current()))],
 			["x", "trash", doTrash], ["p/P", "page", [doPreview, doPreviewAll]],
 			["u", "undo", doUndo],
 			["s", "subcollections", doDeep, true],
-			["f", "switch", openFeeds], ["o", "open", openURL, true],
+			["f", "switch", openFeeds], ["g", "go to…", openJump, true],
+			["o", "open", openURL, true],
+			["O", "show in library", showInLibrary, true],
+			["c", "copy…", openCopy, true],
 			["+/−", "size", sized(), true],
 			["0", "reset size", () => setScale(1), true],
 			["↑/↓/Space", "scroll", null, true],
@@ -2872,6 +3022,20 @@ function build(w) {
 		advance();
 	};
 
+	// A long deck is not read a card at a time end to end: a shifted arrow
+	// covers ten and Home and End go to the ends. It stops at the last card
+	// rather than the summary — the deck is somewhere you are moving about in,
+	// and arriving at the finish screen is something you do by reading to it.
+	const jump = (to) => {
+		const at = Math.max(0, Math.min(ids.length - 1, to));
+		if (busy || !ids.length || at === cursor) return;
+		statTick();
+		dir = at > cursor ? "from-right" : "from-left";
+		previewing = false;
+		cursor = at;
+		render();
+	};
+
 	// Somewhere else in the deck, dealt next. It swaps a card up rather than
 	// jumping the cursor: the count stays honest — "seen" is cards you have
 	// looked at, not how far down the list you landed — and undo and ← still
@@ -3025,6 +3189,11 @@ function build(w) {
 				render();
 				return flash("Undone");
 			}
+			// A change to the card you never left: put it back and stay on it.
+			if (was.stay) {
+				render();
+				return flash("Undone");
+			}
 			dir = "from-left";
 			// The undone item is the one before the cursor, unless we already
 			// ran off the end — then it is the last card.
@@ -3073,6 +3242,24 @@ function build(w) {
 		})).catch((e) => { oops(e); link(); });
 	};
 
+	// The same item, in the main window's items list — Zotero's own view of it,
+	// with the panes and the fields the card leaves out. It selects the library
+	// or collection holding the item first, so a feed card lands in its feed,
+	// and it takes the focus with it: you asked to be over there.
+	const showInLibrary = () => {
+		const item = current();
+		if (!item) return;
+		// A feed card that says "in library" is an announcement of something you
+		// already have, and the copy is the one worth looking at: it carries the
+		// collections, tags and notes the announcement knows nothing about.
+		const copy = isFeedMode() ? libraryCopy(item) : null;
+		const main = safe(() => Zotero.getMainWindow(), null);
+		if (!main || !main.ZoteroPane) return flash("No Zotero window to show it in");
+		safe(() => main.focus());
+		safe(() => Promise.resolve(main.ZoteroPane.selectItem((copy || item).id))
+			.catch(oops));
+	};
+
 	// --- the filing panel --------------------------------------------------
 
 	// Filing a feed card: pick a collection, tags and a note, then keep it.
@@ -3097,9 +3284,15 @@ function build(w) {
 	// and nothing else — a note box with a tag box sitting on top of it was
 	// only ever the feed's tab-through-everything flow.
 	const manageJob = (kind, item, notes) => ({
-		label: "Move to",
-		pick: kind === "move",
+		label: kind === "add" ? "Add to" : "Move to",
+		pick: kind === "move" || kind === "add",
+		verb: kind === "add" ? "add here" : "move here",
 		only: true,
+		// Best effort: the picker marks the shelves it is already on, so you do
+		// not file it somewhere it is. Not the guard — that is in run(), after
+		// the collections are certainly loaded.
+		already: new Set(kind === "add" && item
+			? safe(() => item.getCollections(), []) : []),
 		start: kind === "tags" ? 1 : kind === "note" ? 2 : 0,
 		notes: notes || [],
 		// The tags it already has, so the panel is what the item looks like
@@ -3115,21 +3308,38 @@ function build(w) {
 				const undos = [];
 				if (kind === "tags") undos.push(await retag(card, tags));
 				if (note) undos.push(await addNote(card, note));
-				if (c) undos.push(await moveTo(card, scopeColl, c.id));
+				if (c) {
+					// Adding is moving from nowhere: moveTo leaves the deck's
+					// own collection on when there is no `from`. Adding it to a
+					// shelf it is already on would write nothing and leave an
+					// undo that takes it off one it was on before you started.
+					await Zotero.Items.loadDataTypes([card], ["collections"]);
+					if (kind === "add" && card.getCollections().includes(c.id)) {
+						return flash("Already in " + c.path);
+					}
+					undos.push(await moveTo(card, kind === "add" ? null : scopeColl, c.id));
+				}
 				const back = undos.filter(Boolean);
 				if (!back.length) return;
 				stat.kept++;
 				statTick();
 				undoStack.push({
 					id: card.id,
-					at: c ? at : undefined,
+					at: kind === "move" && c ? at : undefined,
+					// Everything but a move leaves the card where it is, so
+					// undoing it is a redraw and not a step back through the
+					// deck — which is what an undo with no `at` means in feed
+					// mode, where the card had already gone.
+					stay: !(kind === "move" && c),
 					revert: async () => { for (const undo of back.reverse()) await undo(); },
 				});
-				flash(c ? "→ " + c.path : kind === "note" ? "Note added" : "Tags saved");
+				flash(c ? (kind === "add" ? "+ " : "→ ") + c.path
+					: kind === "note" ? "Note added" : "Tags saved");
 				// A moved card has left this collection, so the deck closes over
-				// it; anything else redraws the card you are still on, which is
+				// it; anything else — an added one included, since it is still
+				// filed here too — redraws the card you are still on, which is
 				// how a tag you just took off disappears from it.
-				if (c) { ids.splice(at, 1); cache.delete(card.id); }
+				if (kind === "move" && c) { ids.splice(at, 1); cache.delete(card.id); }
 				render();
 			})()).catch((e) => { oops(e); flash("Failed — see the error console"); });
 		},
@@ -3251,7 +3461,7 @@ function build(w) {
 		panel = el(doc, "div", "file");
 		doc.body.insertBefore(panel, bar);
 
-		const already = copy ? copy.colls : new Set();
+		const already = job.already || (copy ? copy.colls : new Set());
 		// A reminder of what you just chose, where you can still change your
 		// mind with Escape.
 		const dupeLine = copy ? el(doc, "div", "dupe", dropOld
@@ -3570,7 +3780,7 @@ function build(w) {
 		const done = job.only ? "save" : "file";
 		const panelHints = () => {
 			if (stage === 0) {
-				hint([["⏎", job.only ? "move here" : "file here", () => commit()]]
+				hint([["⏎", job.only ? (job.verb || "move here") : "file here", () => commit()]]
 					.concat(job.only
 						? [] : [["⇥", "add tags", () => { takeCollection(); setStage(1); }]])
 					.concat([["↑↓", "pick", pick], ["Esc", "back", back]]));
@@ -3791,8 +4001,12 @@ function build(w) {
 		// it, and everything that changes an item says so by name.
 		if (!isFeedMode()) {
 			switch (e.key) {
-				case "ArrowLeft": e.preventDefault(); return prev();
-				case "ArrowRight": e.preventDefault(); return next();
+				case "ArrowLeft": e.preventDefault();
+					return e.shiftKey ? jump(cursor - CHUNK) : prev();
+				case "ArrowRight": e.preventDefault();
+					return e.shiftKey ? jump(cursor + CHUNK) : next();
+				case "Home": e.preventDefault(); return jump(0);
+				case "End": e.preventDefault(); return jump(ids.length - 1);
 				case "m": e.preventDefault(); return openPanel(manageJob("move", current()));
 				case "t": e.preventDefault(); return openPanel(manageJob("tags", current()));
 				case "n": e.preventDefault(); return openNotes();
@@ -3801,6 +4015,8 @@ function build(w) {
 				case "p": e.preventDefault(); return doPreview();
 				case "P": e.preventDefault(); return doPreviewAll();
 				case "s": e.preventDefault(); return doDeep();
+				case "a": e.preventDefault(); return openPanel(manageJob("add", current()));
+				case "g": e.preventDefault(); return openJump();
 				// r reloads the deck on the end screen; on a card it is random.
 				case "r": if (cursor < ids.length) { e.preventDefault(); return doRandom(); } break;
 				default: break;
@@ -3816,6 +4032,8 @@ function build(w) {
 			case "-": case "_": e.preventDefault(); setScale(fontScale - SIZE_STEP); break;
 			case "0": e.preventDefault(); setScale(1); break;
 			case "o": e.preventDefault(); openURL(); break;
+			case "O": e.preventDefault(); showInLibrary(); break;
+			case "c": e.preventDefault(); openCopy(); break;
 			case "f": e.preventDefault(); openFeeds(); break;
 			// Shift is not always where ? is; / is the key under it either way.
 			case "?": case "/": e.preventDefault(); openHelp(); break;
@@ -3929,6 +4147,7 @@ function shutdown() {
 	colls = [];
 	allTags = [];
 	undoStack = [];
+	deckTitles = null;
 }
 
 function install() {}
@@ -3940,6 +4159,6 @@ if (typeof module !== "undefined") {
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
-		prefOn, eatsTail,
+		prefOn, copyChoices, eatsTail,
 		noteHTML, inlineNote, bankTime, stat, statReset };
 }

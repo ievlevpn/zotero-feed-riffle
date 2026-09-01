@@ -33,6 +33,8 @@ Each card shows the title, authors, date and abstract.
 | <kbd>u</kbd> / <kbd>Ctrl</kbd>+<kbd>Z</kbd> | undo the last discard, save or skip |
 | <kbd>f</kbd> | switch feed (or click the feed name) |
 | <kbd>o</kbd> | open the paper in your browser |
+| <kbd>Shift</kbd>+<kbd>O</kbd> | show the item in Zotero's own items list |
+| <kbd>c</kbd> | copy something off the card — link, reference, DOI, title, abstract |
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
 | <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> | text bigger, smaller, reset (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> too) |
 | <kbd>?</kbd> | help and settings — every key, and what to remember between sittings |
@@ -109,8 +111,9 @@ you return to opens its own fuzzy list again.
 
 <kbd>?</kbd> pulls down a sheet with every key on it, and the handful of
 settings underneath. The hint bar along the bottom carries the keys you reach
-for all day; the ones you do not — <kbd>o</kbd>, <kbd>+</kbd>/<kbd>−</kbd>, and
-<kbd>s</kbd> on a collection deck — live only here, listed rather than taking a
+for all day; the ones you do not — <kbd>o</kbd>, <kbd>Shift</kbd>+<kbd>O</kbd>,
+<kbd>c</kbd>, <kbd>+</kbd>/<kbd>−</kbd>, and <kbd>s</kbd>, <kbd>g</kbd> and the
+jumps on a collection deck — live only here, listed rather than taking a
 slot on a line you read past a thousand times. They are still buttons: clicking
 one puts the sheet away and does the thing.
 
@@ -158,12 +161,27 @@ box, since the arrows would then be typing. In the box they are typing:
 the cards. <kbd>Esc</kbd> steps out to the bare card for a <kbd>t</kbd> or an
 <kbd>x</kbd>, and the notes come back on the next one.
 <kbd>m</kbd> moves the item to another collection (a move, not a copy: it leaves
-the one you are riffling), and <kbd>x</kbd> puts it in Zotero's trash. Each panel
-shows its own row and nothing else.
+the one you are riffling), <kbd>a</kbd> adds it to one without taking it out of
+this one, and <kbd>x</kbd> puts it in Zotero's trash. Each panel shows its own
+row and nothing else. The <kbd>a</kbd> picker marks the collections the item is
+already on, and picking one of those says so rather than writing nothing.
 <kbd>u</kbd> undoes any of it — a trashed or moved card comes back to its own
 place in the deck, and a tag edit is restored exactly, automatic tags included.
+Undoing something that never took the card out of the deck leaves you on that
+card rather than stepping back a place.
 <kbd>o</kbd> opens the item's own file in Zotero's reader, and falls back to the
 link when there is no file — which is every feed card, so nothing changes there.
+<kbd>Shift</kbd>+<kbd>O</kbd> shows it in the main window instead: the library
+or feed holding it gets selected, the item with it, and the focus goes over
+there — for the panes and fields a card deliberately leaves out. On a feed card
+marked **in library** it shows the copy you already have rather than the
+announcement, since the copy is the one carrying your collections, tags and
+notes.
+
+<kbd>c</kbd> opens a short list of what there is to copy: a reference line, the
+link, the DOI, the title, the abstract. Each row shows what it would put in the
+clipboard, and a field the feed never filled in is simply not a row — a menu of
+five things you can paste beats one of nine where four do nothing.
 
 Tags Zotero has given a colour keep it, on the card and in the tag box, and come
 first in its order, the way they do in the items list.
@@ -196,6 +214,15 @@ so pressing it down the deck never hands you the same one twice — it is one
 shuffle dealt a card at a time, not a die rolled at each press. Stepping back
 with <kbd>←</kbd> first puts that card back in play, which is the point of
 stepping back.
+
+<kbd>g</kbd> goes to a card by name: the same fuzzy match the collection picker
+uses, over the titles in the deck, with each row carrying its place in it. The
+titles are read in one query the first time you press it, so a deck you never
+jump in never pays for them. A shifted <kbd>←</kbd> or <kbd>→</kbd> covers ten
+cards and <kbd>Home</kbd> and <kbd>End</kbd> go to the ends — a long deck is not
+something you read one press at a time from one end to the other. Both stop at
+the last card rather than the finish screen: arriving there is something you do
+by reading to it.
 
 <kbd>f</kbd>, or the collection's name in the header, switches to another
 collection without leaving the window — the same picker feeds get, fuzzy-matching

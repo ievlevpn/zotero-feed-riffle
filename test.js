@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, randomAhead, prefOn, noteHTML, bankTime, stat, statReset, eatsTail } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, stat, statReset, eatsTail } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -445,6 +445,35 @@ assert.ok(!eatsTail("<p>Ordinary feed HTML.</p>"), "real markup");
 assert.ok(!eatsTail("no angle brackets at all"), "and prose is not held back");
 assert.ok(!eatsTail("a < b in prose"), "a \"<\" that opens nothing tag-like");
 assert.ok(!eatsTail(""), "");
+
+// --- what there is to copy off a card ---------------------------------------
+// A feed fills in what it feels like, so the menu is only ever the fields that
+// are actually there — an empty row is a row that does nothing when picked.
+const full = copyChoices({
+	title: "Rough paths and SPDEs", authors: "A Lyons, B Gubinelli", year: "2026",
+	doi: "10.1234/rp", url: "https://arxiv.org/abs/2601.00001", abstract: "We show that…",
+});
+assert.deepStrictEqual(full.map((c) => c.name),
+	["Reference", "Link", "DOI", "Title", "Abstract"], "all five, most useful first");
+assert.strictEqual(full[0].text, "A Lyons, B Gubinelli (2026) Rough paths and SPDEs.",
+	"the reference reads as one you could paste");
+assert.strictEqual(full[1].text, "https://arxiv.org/abs/2601.00001",
+	"the item's own URL is the link when it has one");
+
+// The DOI resolver stands in as the link only when there is no URL, and the
+// bare DOI keeps its own row either way.
+const noUrl = copyChoices({ title: "T", doi: "10.1234/rp" });
+assert.deepStrictEqual(noUrl.map((c) => [c.name, c.text]),
+	[["Reference", "T."], ["Link", "https://doi.org/10.1234/rp"],
+		["DOI", "10.1234/rp"], ["Title", "T"]]);
+
+assert.deepStrictEqual(copyChoices({}), [], "a card with nothing on it offers nothing");
+assert.deepStrictEqual(copyChoices({ url: "http://x" }).map((c) => c.name), ["Link"],
+	"a link and no metadata is one row, not five");
+assert.strictEqual(copyChoices({ title: "Ends in a question?" })[0].text,
+	"Ends in a question?", "a reference already punctuated gains no second stop");
+assert.strictEqual(copyChoices({ authors: "A", year: "2026" })[0].text, "A (2026).",
+	"and a title-less one still reads as a line");
 
 // --- banking the sitting into Reading Time ---------------------------------
 // The other plugin is optional: absent, declined, or unanswered all mean the
