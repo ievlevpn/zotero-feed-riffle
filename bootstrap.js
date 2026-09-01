@@ -4080,6 +4080,10 @@ function build(w) {
 const rowIsFeed = (row) => !!(row && row.isFeed && row.isFeed());
 const rowIsCollection = (row) => !!(row && row.isCollection && row.isCollection());
 const ctxRow = (ctx) => ((ctx && ctx.collectionTreeRows) || [])[0];
+// The same array, asked for rather than handed over. Plural: the singular
+// getCollectionTreeRow() was removed from Zotero and throws when called, which
+// safe() turned into "nothing is selected" and quietly dealt every feed.
+const paneRow = (window) => safe(() => window.ZoteroPane.getCollectionTreeRows(), [])[0];
 
 // Is the row this menu was opened on a feed? Anything else — a collection, a
 // library, the Feeds header — is not something to riffle.
@@ -4095,7 +4099,7 @@ const BUTTON_ID = "feed-riffle-tb";
 // search, nothing at all — deals every feed, which is what Tools → Riffle Feeds
 // does. Two buttons would have one of them greyed out most of the time.
 function riffleSelected(window) {
-	const row = safe(() => window.ZoteroPane.getCollectionTreeRow(), null);
+	const row = paneRow(window);
 	if (rowIsFeed(row)) return open(safe(() => row.ref.libraryID, null));
 	if (rowIsCollection(row)) return openCollection(safe(() => row.ref.id, null));
 	return open(null);
