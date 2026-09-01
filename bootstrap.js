@@ -4074,17 +4074,64 @@ function build(w) {
 
 // --- plugin lifecycle ------------------------------------------------------
 
+// What a row in the collections pane is. A menu gets the row it was opened on
+// in its context; the toolbar button reads the one that is selected. Same
+// question either way, so the same two predicates answer it.
+const rowIsFeed = (row) => !!(row && row.isFeed && row.isFeed());
+const rowIsCollection = (row) => !!(row && row.isCollection && row.isCollection());
+const ctxRow = (ctx) => ((ctx && ctx.collectionTreeRows) || [])[0];
+
 // Is the row this menu was opened on a feed? Anything else — a collection, a
 // library, the Feeds header — is not something to riffle.
-function isFeedRow(ctx) {
-	const row = ((ctx && ctx.collectionTreeRows) || [])[0];
-	return !!(row && row.isFeed && row.isFeed());
+const isFeedRow = (ctx) => rowIsFeed(ctxRow(ctx));
+// A collection, rather than a feed, a saved search or a library root.
+const isCollectionRow = (ctx) => rowIsCollection(ctxRow(ctx));
+
+const BUTTON_ID = "feed-riffle-tb";
+
+// One button, because there is only ever one thing you mean by it: the row the
+// collections pane is on. A feed deals that feed, a collection deals that
+// collection, and anything else — a library root, the Feeds header, a saved
+// search, nothing at all — deals every feed, which is what Tools → Riffle Feeds
+// does. Two buttons would have one of them greyed out most of the time.
+function riffleSelected(window) {
+	const row = safe(() => window.ZoteroPane.getCollectionTreeRow(), null);
+	if (rowIsFeed(row)) return open(safe(() => row.ref.libraryID, null));
+	if (rowIsCollection(row)) return openCollection(safe(() => row.ref.id, null));
+	return open(null);
 }
 
-// A collection, rather than a feed, a saved search or a library root.
-function isCollectionRow(ctx) {
-	const row = ((ctx && ctx.collectionTreeRows) || [])[0];
-	return !!(row && row.isCollection && row.isCollection());
+// Zotero 7 has no toolbar API, so this is DOM: a XUL button next to New
+// Collection, in front of the spacer that holds the search button to the right.
+function addButton(window) {
+	const doc = window.document;
+	const bar = doc.getElementById("zotero-collections-toolbar");
+	// Said out loud rather than returning quietly: a button that never appears
+	// is otherwise indistinguishable from one that was never written.
+	if (!bar) return oops(new Error("Feed Riffle: no collections toolbar to add a button to"));
+	// An upgrade in place runs startup before the old sandbox is gone, so the
+	// previous button may still be there. The id is how it is found again.
+	removeButton(window);
+	const b = doc.createXULElement("toolbarbutton");
+	b.id = BUTTON_ID;
+	b.className = "zotero-tb-button";
+	b.setAttribute("tabindex", "-1");
+	b.setAttribute("data-l10n-id", "feed-riffle-toolbar-button");
+	// Zotero's own toolbar icons are context-filled SVGs that take the
+	// toolbar's colour; ours is drawn in strokes, so it is the stroke that
+	// follows. Without this it would be a black icon on a dark theme.
+	b.style.listStyleImage = "url(" + rootURI + "toolbar.svg)";
+	b.style.setProperty("-moz-context-properties", "stroke, stroke-opacity");
+	b.style.stroke = "currentColor";
+	b.addEventListener("command", () => safe(() => riffleSelected(window)));
+	bar.insertBefore(b, bar.querySelector("spacer"));
+}
+
+function removeButton(window) {
+	safe(() => {
+		const b = window.document.getElementById(BUTTON_ID);
+		if (b) b.remove();
+	});
 }
 
 function startup({ id, rootURI: uri }) {
@@ -4132,14 +4179,22 @@ function startup({ id, rootURI: uri }) {
 
 function onMainWindowLoad({ window }) {
 	safe(() => window.MozXULElement.insertFTLIfNeeded("feed-riffle.ftl"));
+	safe(() => addButton(window));
 }
 
-function onMainWindowUnload() {}
+// The window is going away, but an uninstall while it stays open is not — and
+// that path goes through shutdown() below. Both have to take the button out.
+function onMainWindowUnload({ window }) {
+	removeButton(window);
+}
 
 function shutdown() {
 	if (menuID) safe(() => Zotero.MenuManager.unregisterMenu(menuID));
 	if (feedMenuID) safe(() => Zotero.MenuManager.unregisterMenu(feedMenuID));
 	menuID = feedMenuID = null;
+	// The menus are Zotero's to take back; the button is ours, and a window
+	// that outlives the plugin would otherwise keep a dead one.
+	safe(() => { for (const w of Zotero.getMainWindows()) removeButton(w); });
 	if (win && !win.closed) { safe(() => saveState(win)); safe(() => win.close()); }
 	win = null;
 	ids = [];

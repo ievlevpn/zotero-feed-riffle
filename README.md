@@ -19,8 +19,14 @@ a note.
 
 ## Use
 
-**Tools → Riffle Feeds…** for every feed at once, or right-click a feed in the
-collections pane → **Riffle This Feed…** to work through one.
+The button above the collections pane riffles whatever is selected there: a
+feed deals that feed, a collection deals that collection, and anything else —
+a library, the Feeds header, nothing at all — deals every feed. One button
+rather than two, because there is only ever one thing you mean by it.
+
+The same by other routes: **Tools → Riffle Feeds…** for every feed at once, or
+right-click a feed in the collections pane → **Riffle This Feed…** to work
+through one.
 
 Each card shows the title, authors, date and abstract.
 

@@ -1,0 +1,11 @@
+<!-- The toolbar copy of icon.svg: same three cards, drawn at Zotero's 20x20
+     toolbar size and stroked in context-stroke so it takes the toolbar's own
+     colour in both themes. icon.svg keeps currentColor for the add-ons pane,
+     which renders it as a plain image with no context to inherit. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"
+     fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linejoin="round">
+  <rect x="2" y="4.25" width="10" height="12.5" rx="1.75" opacity=".45"/>
+  <rect x="5.5" y="3" width="10" height="12.5" rx="1.75" opacity=".7"/>
+  <rect x="9" y="2" width="9" height="12.5" rx="1.75"/>
+  <path d="M11.25 7.75h4.5M11.25 10.5h3" stroke-linecap="round" opacity=".8"/>
+</svg>

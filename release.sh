@@ -25,7 +25,7 @@ VER=$(node -p "require('./manifest.json').version")
 
 node test.js
 rm -f "$XPI"
-zip -q -r "$XPI" manifest.json bootstrap.js icon.svg locale katex.min.js katex.min.css fonts LICENSE-KaTeX
+zip -q -r "$XPI" manifest.json bootstrap.js icon.svg toolbar.svg locale katex.min.js katex.min.css fonts LICENSE-KaTeX
 
 # Regenerate update.json so update_link always points at this version's asset.
 REPO="$REPO" node -e '
@@ -44,7 +44,7 @@ const out = { addons: { [z.id]: { updates: [{
 fs.writeFileSync("update.json", JSON.stringify(out, null, 2) + "\n");
 '
 
-git add manifest.json bootstrap.js release.sh test.js README.md update.json locale icon.svg katex.min.js katex.min.css fonts
+git add manifest.json bootstrap.js release.sh test.js README.md update.json locale icon.svg toolbar.svg katex.min.js katex.min.css fonts
 # The notes ride along in the commit body, as bullets, where the changelog below
 # reads them back out. An array, because an unquoted ${BODY:+...} would split a
 # note on its spaces into one -m argument per word.
