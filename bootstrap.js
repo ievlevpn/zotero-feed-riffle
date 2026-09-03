@@ -1061,6 +1061,17 @@ function deckRows(feed, feeds, cols) {
 		: tag(cols, true).concat(tag(feeds, false));
 }
 
+// "@f" and "@c" in front of the query keep the list to one half of it: with a
+// few hundred collections in there, a feed whose exact name you have forgotten
+// is otherwise three letters and a lot of scrolling. Returns the query with the
+// prefix taken off, and null for "no prefix, keep everything".
+// ponytail: a collection actually named "@foo" is now searched as "oo" — find
+// it by any other three letters in its name.
+function deckSift(q) {
+	const m = /^@([fc])\s*/i.exec(q);
+	return m ? { q: q.slice(m[0].length), coll: m[1].toLowerCase() === "c" } : { q, coll: null };
+}
+
 // The row for the deck on screen, which is the one the picker opens on: `here`
 // is a libraryID in feed mode and a collection id in collection mode, and the
 // two can collide, so which half a row is in decides before the id does.
@@ -2197,7 +2208,13 @@ function build(w) {
 	// list under the header that Enter picks from — so they are one widget, and
 	// each caller says only what is in the list and what picking does.
 	// `rows` are { name, n } and `n` is the trailing figure, or null for none.
-	const pickMenu = ({ placeholder, rows, sel, empty, onPick }) => {
+	// `sift`, where a caller has one, gets first sight of the query: it can drop
+	// rows and hand back what is left of the text to rank them by.
+	const pickMenu = ({ placeholder, rows, sel, empty, onPick, sift }) => {
+		const find = (q) => {
+			const cut = sift ? sift(q, rows) : { q, rows };
+			return rank(cut.q, cut.rows, (r) => r.name);
+		};
 		menu = el(doc, "div", "feedpick");
 		const input = doc.createElement("input");
 		input.type = "text";
@@ -2210,7 +2227,7 @@ function build(w) {
 		// would otherwise draw two thousand rows on open.
 		// ponytail: past the cap the opening selection lands on the last row
 		// drawn rather than the one you are on — you type to find it anyway.
-		let shown = rank("", rows);
+		let shown = find("");
 		let at = Math.min(Math.max(0, sel || 0), Math.max(0, shown.length - 1));
 
 		const paint = () => {
@@ -2256,7 +2273,7 @@ function build(w) {
 			e.stopPropagation(); // ordinary typing stays in the box
 		});
 		input.addEventListener("input", () => {
-			shown = rank(input.value, rows, (r) => r.name);
+			shown = find(input.value);
 			at = 0;
 			paint();
 		});
@@ -2288,8 +2305,12 @@ function build(w) {
 		const here = feed ? scopeLib : scopeColl;
 		const isHere = (r) => isDeckHere(r, feed, here);
 		pickMenu({
-			placeholder: "Search feeds and collections…",
+			placeholder: "Search feeds and collections (@f, @c)…",
 			rows,
+			sift: (q, all) => {
+				const cut = deckSift(q);
+				return { q: cut.q, rows: cut.coll === null ? all : all.filter((r) => r.coll === cut.coll) };
+			},
 			// Opens on whichever one you are already riffling.
 			sel: rows.findIndex(isHere),
 			empty: "No matching feed or collection",
@@ -4256,6 +4277,6 @@ if (typeof module !== "undefined") {
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
-		prefOn, copyChoices, eatsTail, deckRows, isDeckHere,
+		prefOn, copyChoices, eatsTail, deckRows, isDeckHere, deckSift,
 		noteHTML, inlineNote, bankTime, endSitting, stat, statReset };
 }

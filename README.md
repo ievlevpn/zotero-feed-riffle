@@ -236,6 +236,11 @@ collection in it, the half you are in first, fuzzy-matching the full path. So it
 switches mode as well as deck — a feed deck to a collection and back — and you
 only go near the menus to open the window in the first place.
 
+With a few hundred collections in the same list, a query starting `@f` keeps it
+to feeds and `@c` to collections: `@f` on its own is every feed, and `@f arx` is
+the feeds matching *arx*. Which is the answer to not remembering what a feed is
+called exactly — `@f` and read down the list.
+
 The finish summary counts in the same terms: *6 of 24 seen, 18 still to look at*
 and *5 changed · 1 trashed · 12 min*.
 

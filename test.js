@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -570,6 +570,17 @@ assert.deepStrictEqual(deckRows(false, FEEDS, COLS).map((r) => r.name),
 	["Reading list", "All feeds", "arXiv"], "collection deck lists collections first");
 assert.deepStrictEqual(deckRows(true, FEEDS, COLS).map((r) => r.coll),
 	[false, false, true], "every row says which half it came from");
+// "@f" and "@c" keep the picker to one half of the list; anything else is a
+// plain query over both.
+assert.deepStrictEqual(deckSift("arxiv"), { q: "arxiv", coll: null }, "no prefix: everything");
+assert.deepStrictEqual(deckSift("@f"), { q: "", coll: false }, "@f alone: every feed");
+assert.deepStrictEqual(deckSift("@f arx"), { q: "arx", coll: false }, "and the rest is the query");
+assert.deepStrictEqual(deckSift("@Farx"), { q: "arx", coll: false }, "the space is optional, the case is not fussy");
+assert.deepStrictEqual(deckSift("@c rough"), { q: "rough", coll: true }, "@c is the other half");
+assert.deepStrictEqual(deckSift("a@f"), { q: "a@f", coll: null }, "only in front, so an @ mid-query is just text");
+const half = deckRows(true, FEEDS, COLS).filter((r) => r.coll === deckSift("@f").coll);
+assert.deepStrictEqual(half.map((r) => r.name), ["All feeds", "arXiv"], "which is what the picker filters on");
+
 // A feed's libraryID and a collection's id are different numbers that can be
 // the same number: the half has to decide before the id does.
 const rows = deckRows(true, FEEDS, COLS);
