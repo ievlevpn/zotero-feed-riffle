@@ -281,6 +281,11 @@ clock is this plugin's own, so it stops counting after five idle minutes on a
 card. Riffling a collection is not logged: those items have their own reading
 time already.
 
+A sitting starts when the window opens and runs across every feed you switch
+to, so a morning spent moving through four feeds is one row, not four. Switching
+to a collection ends it there and then — the feed time is logged at that moment,
+and the clock starts again for a deck that is not counted the same way.
+
 Once logging is on, the finish screen also carries a note field — `n` to reach
 it — for a line about what the sitting was. It goes on the same *Feed reading*
 row, in the field Reading Time's own timer notes use.

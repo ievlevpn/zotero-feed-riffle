@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, stat, statReset, eatsTail, deckRows, isDeckHere } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -511,6 +511,27 @@ assert.deepStrictEqual(banked, [[900, stat.began, null]], "accepted: one row, in
 assert.ok(stat.banked, "and it is not written twice");
 bankTime();
 assert.strictEqual(banked.length, 1);
+
+// Switching to a collection deck ends the feed sitting: it is banked while it
+// is still a feed's, since the window would close in the wrong mode to log it,
+// and the figures start again for a deck counted in different terms.
+answer = true;
+global.Zotero.ReadingTime = real;
+statReset();
+stat.spent = 600000;
+stat.last = 0;
+stat.kept = 4;
+endSitting("collection");   // mode is still "feed" here, which is the case that banks
+assert.strictEqual(banked.length, 2, "the feed sitting is logged on the way out of it");
+assert.strictEqual(banked[1][0], 600, "with the seconds it had run for");
+assert.strictEqual(stat.kept, 0, "and the tally starts again for the new deck");
+
+statReset();
+stat.spent = 600000;
+stat.last = 0;
+endSitting("feed");
+assert.strictEqual(banked.length, 2, "feed to feed is the same sitting: nothing banked");
+assert.strictEqual(stat.spent, 600000, "and nothing reset");
 
 // --- prefOn: never set is not the same as set to false ---------------------
 // The three settings in the help sheet lean on this: unset means "follow

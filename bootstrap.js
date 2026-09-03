@@ -146,6 +146,18 @@ function bankTime() {
 	}
 }
 
+// The clock runs for the sitting, not the deck, so moving from one feed to the
+// next carries the tally on. Moving to a deck of the other kind does not: the
+// figures are counted in different terms either side of it, and a feed sitting
+// has somewhere to be logged that a collection sitting has not — so it is
+// banked here, while it is still a feed's, rather than at the window's unload
+// where the mode it closes in would have thrown it away.
+function endSitting(next) {
+	if (mode === next) return;
+	bankTime();
+	statReset();
+}
+
 function safe(fn, fallback) {
 	try { return fn(); }
 	catch (e) {
@@ -2048,6 +2060,7 @@ function openSomeCollection() {
 function openCollection(collectionID) {
 	if (!collectionID) return;
 	safe(() => Zotero.Prefs.set(DECK_PREF, String(collectionID)));
+	endSitting("collection");
 	// Zotero's own View setting until you say otherwise in the help sheet, so a
 	// deck holds what the items list holds for anyone who never opens it. Only
 	// on the way in: switching between collections keeps this window's own s.
@@ -2061,6 +2074,7 @@ function openCollection(collectionID) {
 }
 
 function open(libraryID) {
+	endSitting("feed");
 	mode = "feed";
 	scopeColl = null;
 	scopeLib = libraryID || null;
@@ -4243,5 +4257,5 @@ if (typeof module !== "undefined") {
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
 		prefOn, copyChoices, eatsTail, deckRows, isDeckHere,
-		noteHTML, inlineNote, bankTime, stat, statReset };
+		noteHTML, inlineNote, bankTime, endSitting, stat, statReset };
 }
