@@ -37,7 +37,7 @@ Each card shows the title, authors, date and abstract.
 | <kbd>s</kbd> | skip — leave it unread for another day |
 | <kbd>1</kbd>–<kbd>9</kbd> | file straight into a recently used collection |
 | <kbd>u</kbd> / <kbd>Ctrl</kbd>+<kbd>Z</kbd> | undo the last discard, save or skip |
-| <kbd>f</kbd> | switch feed (or click the feed name) |
+| <kbd>f</kbd> | switch deck — any feed or any collection (or click the name) |
 | <kbd>o</kbd> | open the paper in your browser |
 | <kbd>Shift</kbd>+<kbd>O</kbd> | show the item in Zotero's own items list |
 | <kbd>c</kbd> | copy something off the card — link, reference, DOI, title, abstract |
@@ -230,9 +230,11 @@ something you read one press at a time from one end to the other. Both stop at
 the last card rather than the finish screen: arriving there is something you do
 by reading to it.
 
-<kbd>f</kbd>, or the collection's name in the header, switches to another
-collection without leaving the window — the same picker feeds get, fuzzy-matching
-the full path and carrying each collection's item count.
+<kbd>f</kbd>, or the deck's name in the header, switches to anything else you
+could be riffling without leaving the window: one list with every feed and every
+collection in it, the half you are in first, fuzzy-matching the full path. So it
+switches mode as well as deck — a feed deck to a collection and back — and you
+only go near the menus to open the window in the first place.
 
 The finish summary counts in the same terms: *6 of 24 seen, 18 still to look at*
 and *5 changed · 1 trashed · 12 min*.

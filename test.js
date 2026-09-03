@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, stat, statReset, eatsTail } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, stat, statReset, eatsTail, deckRows, isDeckHere } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -539,3 +539,19 @@ statReset();
 assert.strictEqual(stat.note, null, "and a new sitting starts without one");
 
 console.log("ok");
+
+// --- the deck picker: both halves, the one you are in first ----------------
+const FEEDS = [{ id: null, name: "All feeds", n: 3 }, { id: 7, name: "arXiv", n: 3 }];
+const COLS = [{ id: 7, name: "Reading list", n: 12 }];
+assert.deepStrictEqual(deckRows(true, FEEDS, COLS).map((r) => r.name),
+	["All feeds", "arXiv", "Reading list"], "feed deck lists feeds first");
+assert.deepStrictEqual(deckRows(false, FEEDS, COLS).map((r) => r.name),
+	["Reading list", "All feeds", "arXiv"], "collection deck lists collections first");
+assert.deepStrictEqual(deckRows(true, FEEDS, COLS).map((r) => r.coll),
+	[false, false, true], "every row says which half it came from");
+// A feed's libraryID and a collection's id are different numbers that can be
+// the same number: the half has to decide before the id does.
+const rows = deckRows(true, FEEDS, COLS);
+assert.ok(isDeckHere(rows[1], true, 7), "the feed you are on");
+assert.ok(!isDeckHere(rows[2], true, 7), "a collection with the same id is not");
+assert.ok(isDeckHere(rows[2], false, 7), "and it is, on a collection deck");

@@ -1039,6 +1039,21 @@ function feedRows() {
 	return [{ id: null, name: "All feeds", n: total }].concat(feeds);
 }
 
+// Everything f can deal from: both halves of the list, the one you are in
+// first, each row saying which half it came from so picking it knows whether
+// it is switching feed, collection, or mode.
+function deckRows(feed, feeds, cols) {
+	const tag = (rows, coll) => rows.map((r) => ({ ...r, coll }));
+	return feed
+		? tag(feeds, false).concat(tag(cols, true))
+		: tag(cols, true).concat(tag(feeds, false));
+}
+
+// The row for the deck on screen, which is the one the picker opens on: `here`
+// is a libraryID in feed mode and a collection id in collection mode, and the
+// two can collide, so which half a row is in decides before the id does.
+const isDeckHere = (r, feed, here) => r.coll === !feed && r.id === here;
+
 // Every collection you could file into, flattened depth-first and carrying the
 // path that makes it searchable: "Probability / Rough paths".
 function flatCollections() {
@@ -2033,12 +2048,15 @@ function openSomeCollection() {
 function openCollection(collectionID) {
 	if (!collectionID) return;
 	safe(() => Zotero.Prefs.set(DECK_PREF, String(collectionID)));
+	// Zotero's own View setting until you say otherwise in the help sheet, so a
+	// deck holds what the items list holds for anyone who never opens it. Only
+	// on the way in: switching between collections keeps this window's own s.
+	if (!win || win.closed || isFeedMode()) {
+		deep = prefOn(DEEP_PREF, safe(() => !!Zotero.Prefs.get("recursiveCollections"), false));
+	}
 	mode = "collection";
 	scopeColl = collectionID;
 	scopeLib = null;
-	// Zotero's own View setting until you say otherwise in the help sheet, so a
-	// deck holds what the items list holds for anyone who never opens it.
-	deep = prefOn(DEEP_PREF, safe(() => !!Zotero.Prefs.get("recursiveCollections"), false));
 	return openWindow();
 }
 
@@ -2238,28 +2256,34 @@ function build(w) {
 		input.focus();
 	};
 
-	// The same list either way: what else this window could be riffling. Feeds
-	// carry what is unread in them, collections what is in them.
+	// One list of everything this window could be riffling — every feed and
+	// every collection — so f changes deck and mode in the same gesture, and
+	// going from a feed deck to a collection no longer means the Tools menu.
+	// The half you are in comes first, and the other half carries counts only
+	// where they have already been paid for.
 	const openFeeds = () => {
 		if (menu) return closeFeeds();
 		const feed = isFeedMode();
-		const rows = feed ? feedRows() : collRows;
-		if (rows.length < 2) return flash(feed ? "No feeds" : "No collections");
+		// Counts on the collections only where the deck has already paid for
+		// them; from a feed they would be a query each, for a list you are
+		// passing through.
+		const rows = deckRows(feed, feedRows(), collRows.length
+			? collRows
+			: colls.map((c) => ({ id: c.id, name: c.path, n: null })));
+		if (rows.length < 2) return flash("Nothing else to riffle");
 		const here = feed ? scopeLib : scopeColl;
+		const isHere = (r) => isDeckHere(r, feed, here);
 		pickMenu({
-			placeholder: feed ? "Search feeds…" : "Search collections…",
+			placeholder: "Search feeds and collections…",
 			rows,
 			// Opens on whichever one you are already riffling.
-			sel: rows.findIndex((r) => r.id === here),
-			empty: feed ? "No matching feed" : "No matching collection",
+			sel: rows.findIndex(isHere),
+			empty: "No matching feed or collection",
 			onPick: (r) => {
-				if (r.id === here) return;
-				if (feed) scopeLib = r.id;
-				else {
-					scopeColl = r.id;
-					safe(() => Zotero.Prefs.set(DECK_PREF, String(r.id)));
-				}
-				reload().catch(oops);
+				if (isHere(r)) return;
+				// The same two doors the menus use, so switching here sets a deck
+				// up exactly as opening it from the library would.
+				Promise.resolve(r.coll ? openCollection(r.id) : open(r.id)).catch(oops);
 			},
 		});
 	};
@@ -2546,7 +2570,7 @@ function build(w) {
 	const keyList = () => (isFeedMode()
 		? [["←", "discard", doDiscard], ["→", "keep", () => openPanel()],
 			["s", "skip", doSkip], ["u", "undo", doUndo],
-			["1–9", "recent", () => openPanel()], ["f", "feed", openFeeds],
+			["1–9", "recent", () => openPanel()], ["f", "deck", openFeeds],
 			["o", "open", openURL, true],
 			["O", "show in library", showInLibrary, true],
 			["c", "copy…", openCopy, true],
@@ -2566,7 +2590,7 @@ function build(w) {
 			["x", "trash", doTrash], ["p/P", "page", [doPreview, doPreviewAll]],
 			["u", "undo", doUndo],
 			["s", "subcollections", doDeep, true],
-			["f", "switch", openFeeds], ["g", "go to…", openJump, true],
+			["f", "deck", openFeeds], ["g", "go to…", openJump, true],
 			["o", "open", openURL, true],
 			["O", "show in library", showInLibrary, true],
 			["c", "copy…", openCopy, true],
@@ -2883,7 +2907,7 @@ function build(w) {
 			return;
 		}
 
-		feedName.title = isFeedMode() ? "Switch feed" : "Switch collection";
+		feedName.title = "Switch feed or collection";
 		// Only the deck that has one looks a collection up: Collections.get(null)
 		// throws, and safe() would log that once per card drawn.
 		feedName.textContent = isFeedMode()
@@ -4218,6 +4242,6 @@ if (typeof module !== "undefined") {
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
-		prefOn, copyChoices, eatsTail,
+		prefOn, copyChoices, eatsTail, deckRows, isDeckHere,
 		noteHTML, inlineNote, bankTime, stat, statReset };
 }
