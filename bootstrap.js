@@ -1971,6 +1971,21 @@ function sanitizedFragment(doc, raw, baseURL) {
 // of a formula never produces one.
 const BLOCKS = "p, div, blockquote, ul, ol, li, pre, h1, h2, h3, h4, h5, h6, table";
 
+// Nor does a formula produce a link with an address in it. Blogs that ship the
+// excerpt as one unwrapped paragraph and a "Continue reading" link — WordPress's
+// default, so a good half of the maths blogs — have no block element in them at
+// all, and were being read as prose an importer had mangled: unparse() then put
+// the markup back as visible text, "<a href=… class=more-link>" and all.
+// ponytail: an inline-only <em> with no link still flattens. Telling one from
+// "$a<em$" needs more than a selector, and it costs a word's emphasis, not a
+// paragraph of tags.
+const REAL_HTML = BLOCKS + ", a[href]";
+
+// Text a site hides with CSS for the sake of a screen reader — WordPress puts
+// the post's own title in one, after "Continue reading". The card drops the
+// feed's styles, so left in it reads as the title said twice.
+const HIDDEN_TEXT = ".screen-reader-text, .sr-only, .visually-hidden";
+
 // Typeset the formulas inside already-parsed markup. Only text nodes are
 // touched, so the feed's own structure is left exactly as the sanitizer left it.
 function typesetInto(doc, root) {
@@ -2015,7 +2030,8 @@ function abstractNode(doc, raw, baseURL) {
 	raw = inlineImgMath(doc, raw);
 
 	const frag = /[<&]/.test(String(raw || "")) ? sanitizedFragment(doc, raw, baseURL) : null;
-	if (frag && frag.querySelector && frag.querySelector(BLOCKS)) {
+	if (frag && frag.querySelector && frag.querySelector(REAL_HTML)) {
+		for (const hidden of frag.querySelectorAll(HIDDEN_TEXT)) hidden.remove();
 		markClassMath(frag);
 		typesetInto(doc, frag);
 		box.append(frag);
