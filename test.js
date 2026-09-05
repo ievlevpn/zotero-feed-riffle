@@ -127,7 +127,7 @@ assert.deepStrictEqual(splitAbstract("Summary: The result."), { kind: "", body: 
 
 
 // --- description rendering -------------------------------------------------
-const { typography, paragraphs, unparse } = require("./bootstrap.js");
+const { typography, paragraphs, unparse, unparserError } = require("./bootstrap.js");
 
 // TeX ligatures must not reach the reader; a "$" is left alone because outside
 // an academic feed it is money.
@@ -560,6 +560,30 @@ statReset();
 assert.strictEqual(stat.note, null, "and a new sitting starts without one");
 
 console.log("ok");
+
+// --- an abstract the importer filled with a parse error --------------------
+// The real shape of it, from the n-Category Cafe feed: the error page, then the
+// description it choked on, then the caret pointing at the column.
+const BROKEN = '<parsererror>XML Parsing Error: junk after document element\n'
+	+ 'Location: moz-nullprincipal:f404f81a-e3db-48fc-86c7-ecb8ab99af3f\n'
+	+ 'Line Number 3, Column 1:<sourcetext><p>Three generations.</p>\n^</sourcetext></parsererror>';
+assert.strictEqual(unparserError(BROKEN), "<p>Three generations.</p>",
+	"the description comes back, the report of the accident does not");
+assert.strictEqual(splitAbstract(BROKEN).body, "<p>Three generations.</p>",
+	"which is what the card and the copy list both read");
+// Truncated in the field, so there is no closing tag to find.
+assert.strictEqual(unparserError(BROKEN.replace("</sourcetext></parsererror>", "")),
+	"<p>Three generations.</p>", "an unterminated sourcetext still gives up the post");
+assert.strictEqual(unparserError("<p>A post about a &lt;parsererror&gt;.</p>"),
+	"<p>A post about a &lt;parsererror&gt;.</p>", "prose that merely mentions one is untouched");
+assert.strictEqual(unparserError(""), "", "and nothing is nothing");
+// The shape it actually arrives in: the source is text inside the error page,
+// so its markup comes escaped and has to be markup again.
+const ESCAPED = BROKEN.replace("<p>Three generations.</p>", "&lt;p&gt;Three generations.&lt;/p&gt;");
+assert.strictEqual(unparserError(ESCAPED), "<p>Three generations.</p>",
+	"escaped source is markup again, or the card just shows <p> instead");
+assert.strictEqual(unparserError(BROKEN.replace("Three generations.", "Bell &amp; Howell &lt;3")),
+	"<p>Bell & Howell <3</p>", "and the entities inside it decode once, not twice");
 
 // --- the deck picker: both halves, the one you are in first ----------------
 const FEEDS = [{ id: null, name: "All feeds", n: 3 }, { id: 7, name: "arXiv", n: 3 }];

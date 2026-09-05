@@ -444,8 +444,31 @@ function heldPhrase(notes, annots) {
 //   "arXiv:2506.13429v2 Announce Type: replace \nAbstract: <the actual text>"
 // The announce type is worth a glance (a revision of something you already
 // looked at reads differently from a new paper), the rest is chrome.
+// Nothing here parses XML, but the importer upstream does: a feed with junk
+// after its document element leaves Gecko's own error page in the abstract —
+// "<parsererror>XML Parsing Error: … Location: moz-nullprincipal:… " and then a
+// <sourcetext> holding the description it was reading when it gave up. That
+// half is the post, so keep it and drop the report of the accident.
+// ponytail: the caret line the error draws under the offending column goes with
+// it. Recovering the exact column of a feed you cannot fix is not worth a line.
+// Exported for test.js.
+function unparserError(raw) {
+	const t = String(raw || "");
+	if (!/^\s*<parsererror[\s>]/i.test(t)) return t;
+	const m = /<sourcetext>([\s\S]*?)(?:<\/sourcetext>|$)/i.exec(t);
+	if (!m) return t;
+	// The source sits in the error page as text, so its own markup arrived
+	// escaped and has to be markup again — otherwise the card shows "<p>" for
+	// the same reason it was showing "<parsererror>".
+	return m[1].replace(/\s*\^\s*$/, "")
+		.replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+		.replace(/&quot;/g, '"').replace(/&#0*39;|&apos;/gi, "'")
+		.replace(/&amp;/g, "&")
+		.trim();
+}
+
 function splitAbstract(text) {
-	const t = (text || "").trim();
+	const t = unparserError(text).trim();
 	const m = t.match(/^arXiv:\S+\s+Announce Type:\s*([a-z-]+)\s*/i);
 	let kind = m ? m[1].toLowerCase() : "";
 	let body = m ? t.slice(m[0].length) : t;
@@ -4290,7 +4313,7 @@ function uninstall() {}
 // node-only: lets test.js import the pure helpers; no-op inside Zotero.
 if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
-		splitTags, splitMath, typography, paragraphs, abstractNode, unparse,
+		splitTags, splitMath, typography, paragraphs, abstractNode, unparse, unparserError,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
 		prefOn, copyChoices, eatsTail, deckRows, isDeckHere, deckSift,
