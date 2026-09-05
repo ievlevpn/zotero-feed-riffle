@@ -1868,6 +1868,10 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 	font-size:.72rem; padding:.1rem .3rem; border-radius:4px;
 	color:color-mix(in srgb, GrayText 55%, Canvas); }
 .quiet:hover { color:GrayText; background:color-mix(in srgb, GrayText 12%, Canvas); }
+/* The offer inside a warning: its own line, and a border, since a sentence with
+   a button in it reads as a sentence until the button looks like one. */
+.warn .act { display:block; margin:.45rem 0 .1rem; padding:.2rem .5rem;
+	border:1px solid color-mix(in srgb, GrayText 45%, Canvas); }
 .asks { display:flex; gap:.2rem; }
 /* The note field: a line on the same page as the figures it belongs to, and as
  * quiet as they are until you are actually in it. */
@@ -3146,28 +3150,29 @@ function build(w) {
 		if (previewAtt) cardBox.append(previewNode(att));
 		else if (body) cardBox.append(abstractNode(doc, body, item.getField("url")));
 		else if (att === undefined) cardBox.append(el(doc, "div", "abs empty", "Looking for a file…"));
-		else {
-			cardBox.append(el(doc, "div", "abs empty", isFeedMode()
-				? "No abstract. F reads this one from the feed." : "No abstract."));
+		else if (isFeedMode()) {
+			cardBox.append(el(doc, "div", "abs empty", "No abstract."),
+				offerRefetch("This feed sent nothing but a heading for this item."));
 		}
+		else cardBox.append(el(doc, "div", "abs empty", "No abstract."));
 
 		// Said plainly, because nothing else on the card would give it away: the
 		// text simply stops, reading like a short abstract rather than a lost one.
 		if (importerCut(item.getField("abstractNote"))) {
-			cardBox.append(el(doc, "div", "warn",
+			cardBox.append(offerRefetch(
 				"Zotero's feed importer read a \u201c<\u201d in this abstract as the start of "
 				+ "an HTML tag and dropped what followed, so it breaks off early. "
-				+ "F reads this one straight from the feed instead; the whole thing is "
-				+ "also at the link below \u2014 o opens it."));
+				+ "The whole thing is also at the link below \u2014 o opens it."));
 		}
 
 		// The importer parsed the feed as XML, the feed was not valid XML, and its
 		// error page was filed as the abstract. What is on the card is whatever
 		// of the description that page had quoted before giving up.
 		if (isFeedMode() && /^\s*<parsererror[\s>]/i.test(safe(() => item.getField("abstractNote"), "") || "")) {
-			cardBox.append(el(doc, "div", "warn",
+			cardBox.append(offerRefetch(
 				"This feed's XML would not parse, so Zotero stored the parser's error "
-				+ "page as the abstract. F reads the item straight from the feed instead."));
+				+ "page as the abstract. What is above is whatever of the description "
+				+ "the parser had reached before it gave up."));
 		}
 
 		if (katexError) {
@@ -3487,6 +3492,17 @@ function build(w) {
 			oops(e);
 			flash("Could not read the feed");
 		}));
+	};
+
+	// A warning that can do something about itself. The key is in the help sheet,
+	// which is exactly where someone meeting a mangled card for the first time is
+	// not looking — so the offer is on the card, as the button it describes.
+	const offerRefetch = (text) => {
+		const box = el(doc, "div", "warn", text);
+		const b = el(doc, "button", "quiet act", "Read it from the feed \u2014 F");
+		b.addEventListener("mousedown", (e) => { e.preventDefault(); doRefetch(); });
+		box.append(b);
+		return box;
 	};
 
 	// --- the filing panel --------------------------------------------------

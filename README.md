@@ -296,8 +296,11 @@ fullest it has — replaces the abstract on the item, so the card, the copy list
 and Zotero's own item pane all get it. One request covers the whole feed and the
 answer is kept for the sitting, so the second mangled card from it costs nothing.
 
-It is offered rather than automatic, and it works on any feed card: an item whose
-feed only ever sends a title is a fair use of it too.
+It is offered rather than automatic, and the offer comes to you: a card whose
+abstract is a parse-error page, one that breaks off mid-sentence, or one with no
+abstract at all carries a **Read it from the feed** button, since the key alone
+would only help someone who already knew it was there. The key works on any feed
+card, though — an item whose feed only ever sends a title is a fair use of it.
 
 ## Reading time
 
