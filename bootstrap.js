@@ -21,6 +21,7 @@ const DECK_PREF = "feedRiffle.lastDeck";       // collection id last riffled
 const STATS_PREF = "feedRiffle.summary";       // false: the finish summary stays off
 const RT_PREF = "feedRiffle.readingTime";      // unset: ask once; then true or false
 const PAGES_PREF = "feedRiffle.pagesFirst";    // a collection deck opens on pages, not text
+const REREAD_PREF = "feedRiffle.rereadFeeds"; // feeds always read from the feed itself
 const DEEP_PREF = "feedRiffle.subcollections"; // unset: follow Zotero's own View setting
 const RECENT_MAX = 9; // as many as there are number keys
 const BASE_PX = 15;   // reading size at scale 1, before Zotero's own setting
@@ -1127,7 +1128,10 @@ function fetchFeed(doc, libraryID) {
 		// Ten seconds, because the keys are held while this runs: a feed that is
 		// not answering should give the deck back rather than hold it.
 		: Zotero.HTTP.request("GET", url, { responseType: "text", timeout: 10000 })
-			.then((xhr) => parseFeed(doc, (xhr && (xhr.responseText || xhr.response)) || ""));
+			.then((xhr) => {
+				const fdoc = parseFeed(doc, (xhr && (xhr.responseText || xhr.response)) || "");
+				return fdoc && feedIndex(fdoc);
+			});
 	feedDocs.set(libraryID, job);
 	// A feed that was down, or a laptop that was, is worth asking again.
 	job.catch(() => feedDocs.delete(libraryID));
@@ -1159,45 +1163,118 @@ function entryLinks(entry) {
 
 const flatText = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
 
-// The entry this card was made from: its link, or its title where a feed links
-// somewhere else than the importer recorded.
-function feedEntry(fdoc, url, title) {
-	const entries = [...fdoc.getElementsByTagName("*")]
-		.filter((e) => /^(item|entry)$/.test(tagName(e)));
-	const want = linkKey(url);
-	const byLink = want && entries.find((e) => entryLinks(e).some((l) => linkKey(l) === want));
-	if (byLink) return byLink;
-	const wantTitle = flatText(title);
-	if (!wantTitle) return null;
-	return entries.find((e) => [...e.getElementsByTagName("*")]
-		.some((c) => tagName(c) === "title" && flatText(c.textContent) === wantTitle)) || null;
+// The feed indexed the way a card asks about it: every address an entry offers,
+// and its title for the feeds that link somewhere else than the importer
+// recorded. Built once, because the alternative is scanning the whole document
+// again for every card in the deck. First entry wins a key it shares.
+function feedIndex(fdoc) {
+	const by = new Map();
+	const put = (k, e) => { if (k && !by.has(k)) by.set(k, e); };
+	for (const e of fdoc.getElementsByTagName("*")) {
+		if (!/^(item|entry)$/.test(tagName(e))) continue;
+		for (const l of entryLinks(e)) put(linkKey(l), e);
+		for (const c of e.getElementsByTagName("*")) {
+			if (tagName(c) !== "title") continue;
+			// Never key an entry on an empty title, or every untitled item in the
+			// deck would match it.
+			const t = flatText(c.textContent);
+			if (t) put("title:" + t, e);
+			break;
+		}
+	}
+	return by;
 }
 
-// What the feed says about it, fullest first: content:encoded is the whole post
-// where a feed carries both, <content> is Atom's, <description> is RSS's.
+const indexEntry = (by, url, title) => (by
+	&& (by.get(linkKey(url)) || by.get("title:" + flatText(title)))) || null;
+
+// What the feed says about it — the excerpt it publishes for readers, which is
+// also the field Zotero would have stored had its parse worked. content:encoded
+// carries the whole post on the feeds that have both, and a card is for deciding
+// about a paper rather than reading it, so the full text is the fallback and not
+// the prize: without an excerpt something is better than an empty card.
+// ponytail: no length cap on the way in. The card scrolls, and a feed that only
+// ships full posts shipped them before any of this too.
 function entryBody(entry) {
 	const kids = [...entry.getElementsByTagName("*")];
 	const pick = (name) => {
 		const hit = kids.find((e) => tagName(e) === name);
 		return hit ? (hit.textContent || "").trim() : "";
 	};
-	return pick("encoded") || pick("content") || pick("description") || pick("summary") || "";
+	return pick("description") || pick("summary") || pick("content") || pick("encoded") || "";
 }
 
-// The card's abstract, read out of the feed rather than out of the importer's
-// copy of it. True when something came back and it was not what we had.
-async function refetchAbstract(doc, item) {
-	const fdoc = await fetchFeed(doc, item.libraryID);
-	if (!fdoc) return false;
-	const entry = feedEntry(fdoc, safe(() => item.getField("url"), ""),
-		safe(() => item.getField("title"), ""));
-	const body = entry ? entryBody(entry) : "";
-	if (!body || body === safe(() => item.getField("abstractNote"), "")) return false;
-	item.setField("abstractNote", body);
-	// The card shows it either way; saving is so it survives the next card.
-	await Promise.resolve(item.saveTx()).catch(oops);
-	return true;
+// A feed whose importer copy is never right — n-Category Cafe's XML has not
+// parsed in a long time — is worth marking once rather than rescuing a deck at
+// a time. Kept by address rather than by library id: removing a feed in Zotero
+// and adding it back gives it a new id and the same address.
+const rereadSet = () => new Set(String(safe(() => Zotero.Prefs.get(REREAD_PREF), "") || "")
+	.split("\n").map((u) => u.trim().toLowerCase()).filter(Boolean));
+
+const feedAddress = (libraryID) => String(safe(() => Zotero.Feeds.get(libraryID).url, "") || "")
+	.trim().toLowerCase();
+
+const rereads = (libraryID) => {
+	const a = feedAddress(libraryID);
+	return !!a && rereadSet().has(a);
+};
+
+function setReread(libraryID, on) {
+	const a = feedAddress(libraryID);
+	if (!a) return;
+	const set = rereadSet();
+	if (on) set.add(a);
+	else set.delete(a);
+	safe(() => Zotero.Prefs.set(REREAD_PREF, [...set].join("\n")));
 }
+
+// Every card in this deck that came from the same feed, reread from the one
+// document already fetched. A feed carries only its most recent entries while
+// Zotero's copy of it accumulates, so an item the feed has forgotten is left
+// exactly as it is and counted — replacing it with nothing would be the worse
+// answer to a question nobody asked.
+async function refetchDeck(doc, libraryID, deckIDs) {
+	const by = await fetchFeed(doc, libraryID);
+	if (!by || !by.size) return null;
+	const all = (await Zotero.Items.getAsync(deckIDs)) || [];
+	const mine = all.filter((it) => it && it.libraryID === libraryID);
+	const fixed = [];
+	let gone = 0;
+	for (const it of mine) {
+		const entry = indexEntry(by, safe(() => it.getField("url"), ""),
+			safe(() => it.getField("title"), ""));
+		const body = entry ? entryBody(entry) : "";
+		if (!body) { gone++; continue; }
+		if (body === safe(() => it.getField("abstractNote"), "")) continue;
+		safe(() => it.setField("abstractNote", body));
+		fixed.push(it);
+	}
+	// One transaction for the lot: a feed's worth of saveTx() is a feed's worth
+	// of transactions, and the deck is held while they run.
+	if (fixed.length) {
+		await Zotero.DB.executeTransaction(async () => {
+			for (const it of fixed) await it.save();
+		});
+	}
+	return { read: fixed.length, gone, seen: mine.length };
+}
+
+// Dealt from a feed that is marked, the deck is reread without being asked. It
+// runs behind the first card rather than in front of it: the fetch is a network
+// round trip, the deck is already usable without it, and only the card on screen
+// has to be drawn again. Returns how many cards changed.
+async function autoReread(doc, deckIDs) {
+	if (!deckIDs.length || !rereadSet().size) return 0;
+	const all = (await Zotero.Items.getAsync(deckIDs)) || [];
+	const libs = [...new Set(all.map((i) => i && i.libraryID).filter(Boolean))].filter(rereads);
+	let n = 0;
+	for (const lib of libs) {
+		const got = await refetchDeck(doc, lib, deckIDs).catch((e) => { oops(e); return null; });
+		if (got) n += got.read;
+	}
+	return n;
+}
+
 // Every collection you could file into, flattened depth-first and carrying the
 // path that makes it searchable: "Probability / Rough paths".
 function flatCollections() {
@@ -1870,7 +1947,8 @@ body { margin:0; height:100vh; display:flex; flex-direction:column; overflow:hid
 .quiet:hover { color:GrayText; background:color-mix(in srgb, GrayText 12%, Canvas); }
 /* The offer inside a warning: its own line, and a border, since a sentence with
    a button in it reads as a sentence until the button looks like one. */
-.warn .act { display:block; margin:.45rem 0 .1rem; padding:.2rem .5rem;
+.warn .acts { display:flex; gap:.35rem; margin:.45rem 0 .1rem; flex-wrap:wrap; }
+.warn .act { padding:.2rem .5rem;
 	border:1px solid color-mix(in srgb, GrayText 45%, Canvas); }
 .asks { display:flex; gap:.2rem; }
 /* The note field: a line on the same page as the figures it belongs to, and as
@@ -2321,6 +2399,12 @@ async function reload() {
 	}
 	if (w.closed) return; // closed while loading
 	build(w);
+	// A marked feed is reread as the deck is dealt. Behind the card, not in
+	// front of it: only the one on screen needs drawing again, and the redraw
+	// stands down if a panel is open over it.
+	autoReread(w.document, ids.slice()).then((n) => {
+		if (n && !w.closed && win === w) safe(() => w._riffleRedraw && w._riffleRedraw());
+	}).catch(oops);
 }
 
 // One keydown listener on the document, dispatching on which layer is up.
@@ -2567,6 +2651,19 @@ function build(w) {
 			rows.append(row);
 		};
 		if (isFeedMode()) {
+			// Per feed, not per window: the card on screen says which feed, and
+			// on an all-feeds deck that is the one you are looking at.
+			const lib = safe(() => current().libraryID, null) || scopeLib;
+			if (lib) {
+				toggle("Always reread this feed from the feed itself",
+					() => rereads(lib),
+					(on) => {
+						setReread(lib, on);
+						if (!on) return;
+						closeFeeds();
+						doRefetch();
+					});
+			}
 			// Only where there is somewhere to log to. Answering here is the
 			// same answer the end screen asks for, so it stops asking.
 			if (readingTime()) {
@@ -2753,7 +2850,7 @@ function build(w) {
 			["o", "open", openURL, true],
 			["O", "show in library", showInLibrary, true],
 			["c", "copy…", openCopy, true],
-			["F", "reread from the feed", doRefetch, true],
+			["F", "reread this feed", doRefetch, true],
 			["+/−", "size", sized(), true],
 			["0", "reset size", () => setScale(1), true],
 			["↑/↓/Space", "scroll", null, true],
@@ -3162,7 +3259,8 @@ function build(w) {
 			cardBox.append(offerRefetch(
 				"Zotero's feed importer read a \u201c<\u201d in this abstract as the start of "
 				+ "an HTML tag and dropped what followed, so it breaks off early. "
-				+ "The whole thing is also at the link below \u2014 o opens it."));
+				+ "Rereading takes every card in this deck from the same feed; the whole "
+				+ "of this one is also at the link below \u2014 o opens it."));
 		}
 
 		// The importer parsed the feed as XML, the feed was not valid XML, and its
@@ -3172,7 +3270,9 @@ function build(w) {
 			cardBox.append(offerRefetch(
 				"This feed's XML would not parse, so Zotero stored the parser's error "
 				+ "page as the abstract. What is above is whatever of the description "
-				+ "the parser had reached before it gave up."));
+				+ "the parser had reached before it gave up \u2014 and if it did that "
+				+ "here it did it to every card from this feed, which rereading fixes "
+				+ "in one go."));
 		}
 
 		if (katexError) {
@@ -3485,9 +3585,15 @@ function build(w) {
 		const item = current();
 		if (!item || busy || !isFeedMode()) return;
 		flash("Reading the feed\u2026");
-		guard(refetchAbstract(doc, item).then((got) => {
-			flash(got ? "Read from the feed" : "The feed has nothing more on this one");
-			if (got) render();
+		guard(refetchDeck(doc, item.libraryID, ids.slice()).then((got) => {
+			if (!got) return flash("Could not read that feed");
+			// What the feed no longer carries is worth saying: it is the whole
+			// reason a deck this old does not come back fixed all through.
+			const bits = [];
+			if (got.read) bits.push(got.read + (got.read === 1 ? " card reread" : " cards reread"));
+			if (got.gone) bits.push(got.gone + " no longer in the feed");
+			flash(bits.join(" \u00b7 ") || "The feed says what Zotero already had");
+			if (got.read) render();
 		}).catch((e) => {
 			oops(e);
 			flash("Could not read the feed");
@@ -3499,9 +3605,24 @@ function build(w) {
 	// not looking — so the offer is on the card, as the button it describes.
 	const offerRefetch = (text) => {
 		const box = el(doc, "div", "warn", text);
-		const b = el(doc, "button", "quiet act", "Read it from the feed \u2014 F");
-		b.addEventListener("mousedown", (e) => { e.preventDefault(); doRefetch(); });
-		box.append(b);
+		const act = (label, fn) => {
+			const b = el(doc, "button", "quiet act", label);
+			b.addEventListener("mousedown", (e) => { e.preventDefault(); fn(); });
+			return b;
+		};
+		const row = el(doc, "div", "acts");
+		row.append(act("Reread this feed \u2014 F", doRefetch));
+		// A feed that ships broken XML ships it every week, so the answer to
+		// this card is usually the answer to the feed. Off again in the help
+		// sheet, where the rest of what this window remembers lives.
+		const lib = safe(() => current().libraryID, null);
+		if (lib && !rereads(lib)) {
+			row.append(act("Always, for this feed", () => {
+				setReread(lib, true);
+				doRefetch();
+			}));
+		}
+		box.append(row);
 		return box;
 	};
 
@@ -4311,6 +4432,9 @@ function build(w) {
 				break;
 		}
 	};
+	// For a change that landed under the card: the deck's own render, minus the
+	// moments when something else owns the screen.
+	w._riffleRedraw = () => { if (!panel && !busy && !ending) render(); };
 	w._riffleKey = keyHandler;
 	doc.addEventListener("keydown", keyHandler);
 
@@ -4464,6 +4588,6 @@ if (typeof module !== "undefined") {
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse, unparserError,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
-		prefOn, copyChoices, eatsTail, deckRows, isDeckHere, deckSift, linkKey,
+		prefOn, copyChoices, eatsTail, deckRows, isDeckHere, deckSift, linkKey, indexEntry, rereadSet, setReread,
 		noteHTML, inlineNote, bankTime, endSitting, stat, statReset };
 }

@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift, linkKey } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift, linkKey, indexEntry, rereadSet, setReread } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -548,6 +548,31 @@ prefs = { x: true };
 assert.strictEqual(prefOn("x", false), true, "and so does an explicit true");
 global.Zotero.Prefs.get = realGet;
 
+// --- the feeds marked to be reread every time ------------------------------
+// One pref holding a list, so a feed marked once stays marked. Zotero has no
+// feed here, so the address is stubbed the way Zotero.Feeds.get would give it.
+let stored = "";
+const realSet = global.Zotero.Prefs.set;
+const realGet2 = global.Zotero.Prefs.get;
+global.Zotero.Prefs.get = (k) => (k === "feedRiffle.rereadFeeds" ? stored : undefined);
+global.Zotero.Prefs.set = (k, v) => { if (k === "feedRiffle.rereadFeeds") stored = v; };
+global.Zotero.Feeds = { get: (id) => ({ url: id === 7 ? "https://golem.ph.utexas.edu/feed" : "" }) };
+
+assert.deepStrictEqual([...rereadSet()], [], "nothing marked to begin with");
+setReread(7, true);
+assert.deepStrictEqual([...rereadSet()], ["https://golem.ph.utexas.edu/feed"], "marked by address");
+setReread(7, true);
+assert.strictEqual(rereadSet().size, 1, "and marking it twice marks it once");
+setReread(9, true);   // a library that is not a feed has no address to store
+assert.strictEqual(rereadSet().size, 1, "only feeds go in the list");
+setReread(7, false);
+assert.deepStrictEqual([...rereadSet()], [], "and it comes off again");
+stored = "\n  HTTPS://Example.org/Rss  \n\n";
+assert.deepStrictEqual([...rereadSet()], ["https://example.org/rss"],
+	"a list edited by hand in the config editor still reads");
+global.Zotero.Prefs.set = realSet;
+global.Zotero.Prefs.get = realGet2;
+
 // A note typed on the end screen rides along on the same row.
 banked.length = 0;
 withAPI(real);          // banks once, noteless
@@ -570,6 +595,17 @@ assert.strictEqual(linkKey("http://Golem.PH.utexas.edu/a.html/"),
 assert.strictEqual(linkKey("https://x.org/p?utm_source=rss#more"), "x.org/p", "query and fragment");
 assert.notStrictEqual(linkKey("https://x.org/a"), linkKey("https://x.org/b"), "but not the path");
 assert.strictEqual(linkKey(""), "", "and nothing matches nothing, which is why it is checked for");
+
+// Looking a card up in the fetched feed. The feed carries its most recent
+// entries only, so an older item in the deck must find nothing rather than
+// find something else — that is what stops a reread from blanking a backlog.
+const FEED = new Map([["x.org/a", "entry-a"], ["title:three generations in e7", "entry-b"]]);
+assert.strictEqual(indexEntry(FEED, "http://x.org/a/?utm=rss", ""), "entry-a", "by link, loosely");
+assert.strictEqual(indexEntry(FEED, "", "  Three  Generations in E7 "), "entry-b", "or by title");
+assert.strictEqual(indexEntry(FEED, "https://x.org/older-post", "A post long since dropped"), null,
+	"an item the feed has forgotten matches nothing");
+assert.strictEqual(indexEntry(FEED, "", ""), null, "and an item with neither is not everyone's match");
+assert.strictEqual(indexEntry(null, "https://x.org/a", ""), null, "no feed, no match");
 
 // --- an abstract the importer filled with a parse error --------------------
 // The real shape of it, from the n-Category Cafe feed: the error page, then the

@@ -41,7 +41,7 @@ Each card shows the title, authors, date and abstract.
 | <kbd>o</kbd> | open the paper in your browser |
 | <kbd>Shift</kbd>+<kbd>O</kbd> | show the item in Zotero's own items list |
 | <kbd>c</kbd> | copy something off the card — link, reference, DOI, title, abstract |
-| <kbd>Shift</kbd>+<kbd>F</kbd> | reread this item straight from the feed, when the importer's copy is mangled or thin |
+| <kbd>Shift</kbd>+<kbd>F</kbd> | reread this deck's cards straight from the feed, when the importer's copies are mangled or thin |
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
 | <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> | text bigger, smaller, reset (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> too) |
 | <kbd>?</kbd> | help and settings — every key, and what to remember between sittings |
@@ -131,6 +131,7 @@ the window opens:
 |---|---|
 | **Open cards on the page, not the description** | what <kbd>Shift</kbd>+<kbd>P</kbd> does, from the start — for a collection of papers you read rather than abstracts you skim |
 | **Include subcollections** | what <kbd>s</kbd> does, from the start. Untouched, it still follows Zotero's own *Show Items from Subcollections* |
+| **Always reread this feed from the feed itself** | for a feed whose XML never parses: every deck dealt from it is read from the feed as it is dealt. Feed decks only |
 | **Log sittings to Reading Time** | the question the finish screen asks once, answerable before it asks. Only shown when Reading Time is installed |
 | **Show the finish summary** | the same switch the finish screen carries, in the place you would look for it |
 
@@ -138,8 +139,8 @@ Each takes effect on the deck you are in, not just the next one — a default yo
 can only see work tomorrow is one you cannot tell you have set. Turning
 subcollections on redeals the deck, so the sheet closes as it does.
 
-The first two are collection settings and the third is a feed one, so the sheet
-shows what the deck you are in can actually use.
+Two of them are collection settings and two are feed ones, so the sheet shows
+what the deck you are in can actually use.
 
 ## Riffling a collection
 
@@ -286,15 +287,36 @@ drop the rest of a sentence. The card recovers what it can from either: the post
 is taken back out of the error page's `sourcetext`, and an abstract that stops
 mid-sentence says so rather than reading like a short one.
 
-<kbd>Shift</kbd>+<kbd>F</kbd> goes further and reads the item from the feed
-itself. The feed is a URL Zotero already fetches on a schedule, so nothing new is
+<kbd>Shift</kbd>+<kbd>F</kbd> goes further and reads the deck from the feed
+itself — every card in it from the same feed as the card you are on, since a
+feed that mangled one item mangled all of them, and the document it takes them
+from was fetched once either way. The feed is a URL Zotero already fetches on a schedule, so nothing new is
 contacted; it is parsed as XML, and as HTML when that fails — the HTML parser has
 no such thing as malformed input, which is the point on a feed whose XML is what
-went wrong. The entry is matched by link, or by title where a feed links
-elsewhere, and its `content:encoded`, `content`, `description` or `summary` — the
-fullest it has — replaces the abstract on the item, so the card, the copy list
-and Zotero's own item pane all get it. One request covers the whole feed and the
-answer is kept for the sitting, so the second mangled card from it costs nothing.
+went wrong. Each entry is matched by link, or by title where a feed
+links elsewhere, and its `description` or `summary` — the excerpt the feed
+publishes, which is the field Zotero would have stored had its parse worked —
+replaces the abstract on the item, so the card, the copy list and Zotero's own
+item pane all get it. `content` and `content:encoded` are the fallback for a feed
+that has no excerpt: a card is for deciding about a paper rather than reading it,
+so a whole post is better than an empty card but worse than a summary. Nothing is
+truncated either way — the card scrolls, and <kbd>o</kbd> opens the real thing. One request covers the whole
+feed, one transaction covers the writes, and the fetched feed is kept until the
+next deal.
+
+A feed that ships broken XML ships it every week, so the card offers **Always,
+for this feed** beside the one-off. Marked, that feed is reread on its own
+whenever a deck is dealt from it — behind the first card, so nothing waits on the
+network — and the mark survives restarts. It comes off again in the help sheet,
+under *Always reread this feed from the feed itself*. The list is kept by feed
+address in `extensions.zotero.feedRiffle.rereadFeeds`, one per line, so removing
+a feed in Zotero and adding it back keeps the mark.
+
+A feed carries only its most recent entries, while Zotero's copy of it
+accumulates for as long as you leave items unread. So a backlog does not all come
+back fixed: an item the feed has forgotten matches nothing and is left exactly as
+it is, never emptied. The flash says how it went — *12 cards reread · 30 no
+longer in the feed*.
 
 It is offered rather than automatic, and the offer comes to you: a card whose
 abstract is a parse-error page, one that breaks off mid-sentence, or one with no
