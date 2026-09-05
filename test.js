@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift, linkKey } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -560,6 +560,16 @@ statReset();
 assert.strictEqual(stat.note, null, "and a new sitting starts without one");
 
 console.log("ok");
+
+// --- matching a card back to its entry in the feed -------------------------
+// The importer's copy of a link and the feed's own differ in ways that do not
+// mean a different post.
+assert.strictEqual(linkKey("https://golem.ph.utexas.edu/a.html"), "golem.ph.utexas.edu/a.html");
+assert.strictEqual(linkKey("http://Golem.PH.utexas.edu/a.html/"),
+	linkKey("https://golem.ph.utexas.edu/a.html"), "scheme, case and trailing slash");
+assert.strictEqual(linkKey("https://x.org/p?utm_source=rss#more"), "x.org/p", "query and fragment");
+assert.notStrictEqual(linkKey("https://x.org/a"), linkKey("https://x.org/b"), "but not the path");
+assert.strictEqual(linkKey(""), "", "and nothing matches nothing, which is why it is checked for");
 
 // --- an abstract the importer filled with a parse error --------------------
 // The real shape of it, from the n-Category Cafe feed: the error page, then the

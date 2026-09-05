@@ -1100,6 +1100,104 @@ function deckSift(q) {
 // two can collide, so which half a row is in decides before the id does.
 const isDeckHere = (r, feed, here) => r.coll === !feed && r.id === here;
 
+
+// --- reading the feed ourselves ---------------------------------------------
+//
+// The importer's copy of an item is not the only one there is. The feed is a URL
+// Zotero already fetches on its own schedule — so asking for it again contacts
+// nothing new — and one request carries every item in it. Parsed as XML first,
+// which is what a feed is, and as HTML when that fails: the HTML parser has no
+// such thing as malformed input, which is the whole point on a feed whose XML is
+// exactly what went wrong.
+const feedDocs = new Map(); // libraryID → Promise<Document>, one fetch a sitting
+
+function parseFeed(doc, text) {
+	const view = doc.defaultView;
+	if (!view || !view.DOMParser || !String(text || "").trim()) return null;
+	const p = new view.DOMParser();
+	const xml = safe(() => p.parseFromString(text, "text/xml"), null);
+	if (xml && !xml.querySelector("parsererror")) return xml;
+	return safe(() => p.parseFromString(text, "text/html"), null);
+}
+
+function fetchFeed(doc, libraryID) {
+	if (feedDocs.has(libraryID)) return feedDocs.get(libraryID);
+	const url = safe(() => Zotero.Feeds.get(libraryID).url, null);
+	const job = !url || !Zotero.HTTP ? Promise.resolve(null)
+		// Ten seconds, because the keys are held while this runs: a feed that is
+		// not answering should give the deck back rather than hold it.
+		: Zotero.HTTP.request("GET", url, { responseType: "text", timeout: 10000 })
+			.then((xhr) => parseFeed(doc, (xhr && (xhr.responseText || xhr.response)) || ""));
+	feedDocs.set(libraryID, job);
+	// A feed that was down, or a laptop that was, is worth asking again.
+	job.catch(() => feedDocs.delete(libraryID));
+	return job;
+}
+
+// A namespace prefix is the parser's business, not ours: "content:encoded" comes
+// back as "encoded" from the XML parse and whole from the HTML one.
+const tagName = (e) => String(e.localName || "").toLowerCase().replace(/^[a-z]+:/, "");
+
+// The feed's link and the importer's copy of it differ in ways that do not
+// matter — the scheme, a trailing slash, a tracking query. Exported for test.js.
+const linkKey = (s) => String(s || "").trim()
+	.replace(/^https?:\/\//i, "").replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
+
+// Every address an entry offers. Read off attributes as well as text because
+// Atom puts its link in an href, and because <link> is a void element to the
+// HTML parser — on the malformed feeds that is the parse in use, and an RSS
+// link's address ends up as a text node beside it rather than inside it.
+function entryLinks(entry) {
+	const out = [];
+	for (const e of entry.getElementsByTagName("*")) {
+		const href = safe(() => e.getAttribute("href"), null);
+		if (href) out.push(href);
+		if (/^(link|guid|id)$/.test(tagName(e))) out.push(e.textContent || "");
+	}
+	return out;
+}
+
+const flatText = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+// The entry this card was made from: its link, or its title where a feed links
+// somewhere else than the importer recorded.
+function feedEntry(fdoc, url, title) {
+	const entries = [...fdoc.getElementsByTagName("*")]
+		.filter((e) => /^(item|entry)$/.test(tagName(e)));
+	const want = linkKey(url);
+	const byLink = want && entries.find((e) => entryLinks(e).some((l) => linkKey(l) === want));
+	if (byLink) return byLink;
+	const wantTitle = flatText(title);
+	if (!wantTitle) return null;
+	return entries.find((e) => [...e.getElementsByTagName("*")]
+		.some((c) => tagName(c) === "title" && flatText(c.textContent) === wantTitle)) || null;
+}
+
+// What the feed says about it, fullest first: content:encoded is the whole post
+// where a feed carries both, <content> is Atom's, <description> is RSS's.
+function entryBody(entry) {
+	const kids = [...entry.getElementsByTagName("*")];
+	const pick = (name) => {
+		const hit = kids.find((e) => tagName(e) === name);
+		return hit ? (hit.textContent || "").trim() : "";
+	};
+	return pick("encoded") || pick("content") || pick("description") || pick("summary") || "";
+}
+
+// The card's abstract, read out of the feed rather than out of the importer's
+// copy of it. True when something came back and it was not what we had.
+async function refetchAbstract(doc, item) {
+	const fdoc = await fetchFeed(doc, item.libraryID);
+	if (!fdoc) return false;
+	const entry = feedEntry(fdoc, safe(() => item.getField("url"), ""),
+		safe(() => item.getField("title"), ""));
+	const body = entry ? entryBody(entry) : "";
+	if (!body || body === safe(() => item.getField("abstractNote"), "")) return false;
+	item.setField("abstractNote", body);
+	// The card shows it either way; saving is so it survives the next card.
+	await Promise.resolve(item.saveTx()).catch(oops);
+	return true;
+}
 // Every collection you could file into, flattened depth-first and carrying the
 // path that makes it searchable: "Probability / Rough paths".
 function flatCollections() {
@@ -2196,6 +2294,9 @@ async function reload() {
 		cursor = 0;
 		cache.clear();
 		attachments.clear();
+		// A new deal is a good moment to forget a feed we downloaded: Zotero has
+		// probably refreshed it since, and nothing in this deck has asked yet.
+		feedDocs.clear();
 		undoStack = [];
 		deckTitles = null;
 		colls = flatCollections();
@@ -2648,6 +2749,7 @@ function build(w) {
 			["o", "open", openURL, true],
 			["O", "show in library", showInLibrary, true],
 			["c", "copy…", openCopy, true],
+			["F", "reread from the feed", doRefetch, true],
 			["+/−", "size", sized(), true],
 			["0", "reset size", () => setScale(1), true],
 			["↑/↓/Space", "scroll", null, true],
@@ -3044,7 +3146,10 @@ function build(w) {
 		if (previewAtt) cardBox.append(previewNode(att));
 		else if (body) cardBox.append(abstractNode(doc, body, item.getField("url")));
 		else if (att === undefined) cardBox.append(el(doc, "div", "abs empty", "Looking for a file…"));
-		else cardBox.append(el(doc, "div", "abs empty", "No abstract."));
+		else {
+			cardBox.append(el(doc, "div", "abs empty", isFeedMode()
+				? "No abstract. F reads this one from the feed." : "No abstract."));
+		}
 
 		// Said plainly, because nothing else on the card would give it away: the
 		// text simply stops, reading like a short abstract rather than a lost one.
@@ -3052,7 +3157,17 @@ function build(w) {
 			cardBox.append(el(doc, "div", "warn",
 				"Zotero's feed importer read a \u201c<\u201d in this abstract as the start of "
 				+ "an HTML tag and dropped what followed, so it breaks off early. "
-				+ "The whole thing is at the link below \u2014 o opens it."));
+				+ "F reads this one straight from the feed instead; the whole thing is "
+				+ "also at the link below \u2014 o opens it."));
+		}
+
+		// The importer parsed the feed as XML, the feed was not valid XML, and its
+		// error page was filed as the abstract. What is on the card is whatever
+		// of the description that page had quoted before giving up.
+		if (isFeedMode() && /^\s*<parsererror[\s>]/i.test(safe(() => item.getField("abstractNote"), "") || "")) {
+			cardBox.append(el(doc, "div", "warn",
+				"This feed's XML would not parse, so Zotero stored the parser's error "
+				+ "page as the abstract. F reads the item straight from the feed instead."));
 		}
 
 		if (katexError) {
@@ -3356,6 +3471,22 @@ function build(w) {
 		safe(() => main.focus());
 		safe(() => Promise.resolve(main.ZoteroPane.selectItem((copy || item).id))
 			.catch(oops));
+	};
+
+	// The importer's copy came through mangled, or thin; the feed still has the
+	// original. One request fetches the whole feed and the answer is kept for the
+	// sitting, so a second card from the same feed costs nothing.
+	const doRefetch = () => {
+		const item = current();
+		if (!item || busy || !isFeedMode()) return;
+		flash("Reading the feed\u2026");
+		guard(refetchAbstract(doc, item).then((got) => {
+			flash(got ? "Read from the feed" : "The feed has nothing more on this one");
+			if (got) render();
+		}).catch((e) => {
+			oops(e);
+			flash("Could not read the feed");
+		}));
 	};
 
 	// --- the filing panel --------------------------------------------------
@@ -4131,6 +4262,7 @@ function build(w) {
 			case "0": e.preventDefault(); setScale(1); break;
 			case "o": e.preventDefault(); openURL(); break;
 			case "O": e.preventDefault(); showInLibrary(); break;
+			case "F": e.preventDefault(); doRefetch(); break;
 			case "c": e.preventDefault(); openCopy(); break;
 			case "f": e.preventDefault(); openFeeds(); break;
 			// Shift is not always where ? is; / is the key under it either way.
@@ -4316,6 +4448,6 @@ if (typeof module !== "undefined") {
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse, unparserError,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
-		prefOn, copyChoices, eatsTail, deckRows, isDeckHere, deckSift,
+		prefOn, copyChoices, eatsTail, deckRows, isDeckHere, deckSift, linkKey,
 		noteHTML, inlineNote, bankTime, endSitting, stat, statReset };
 }

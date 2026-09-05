@@ -41,6 +41,7 @@ Each card shows the title, authors, date and abstract.
 | <kbd>o</kbd> | open the paper in your browser |
 | <kbd>Shift</kbd>+<kbd>O</kbd> | show the item in Zotero's own items list |
 | <kbd>c</kbd> | copy something off the card — link, reference, DOI, title, abstract |
+| <kbd>Shift</kbd>+<kbd>F</kbd> | reread this item straight from the feed, when the importer's copy is mangled or thin |
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
 | <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> | text bigger, smaller, reset (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> too) |
 | <kbd>?</kbd> | help and settings — every key, and what to remember between sittings |
@@ -275,6 +276,28 @@ Available PDF* (the DOI, then the landing page — an arXiv abstract page
 advertises its PDF, so no DOI is needed), in the background, after the card has
 already flicked away. For the handful of papers that deserve full metadata,
 Zotero's own *Add to My Library* is still right there.
+
+## When the importer mangles an item
+
+Zotero reads a feed by parsing it as XML. A feed that is not valid XML — junk
+after the document element, an unescaped `&`, a stray tag — leaves the parser's
+own error page in the item's abstract, and a `<` inside a formula can have it
+drop the rest of a sentence. The card recovers what it can from either: the post
+is taken back out of the error page's `sourcetext`, and an abstract that stops
+mid-sentence says so rather than reading like a short one.
+
+<kbd>Shift</kbd>+<kbd>F</kbd> goes further and reads the item from the feed
+itself. The feed is a URL Zotero already fetches on a schedule, so nothing new is
+contacted; it is parsed as XML, and as HTML when that fails — the HTML parser has
+no such thing as malformed input, which is the point on a feed whose XML is what
+went wrong. The entry is matched by link, or by title where a feed links
+elsewhere, and its `content:encoded`, `content`, `description` or `summary` — the
+fullest it has — replaces the abstract on the item, so the card, the copy list
+and Zotero's own item pane all get it. One request covers the whole feed and the
+answer is kept for the sitting, so the second mangled card from it costs nothing.
+
+It is offered rather than automatic, and it works on any feed card: an item whose
+feed only ever sends a title is a fair use of it too.
 
 ## Reading time
 
