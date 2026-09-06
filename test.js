@@ -158,6 +158,21 @@ assert.deepStrictEqual(links("https://a.org and https://b.org").length, 3, "one 
 assert.strictEqual(splitLinks("https://x.org/a--b")[0].href, "https://x.org/a--b",
 	"a double hyphen in an address is not an en dash");
 assert.deepStrictEqual(links(""), [], "and nothing in, nothing out");
+// An identifier is an address too, through the resolver everyone uses.
+assert.deepStrictEqual(links("see doi:10.1007/s00440-024-01262-8 for the proof"),
+	["see ", ["doi:10.1007/s00440-024-01262-8", "https://doi.org/10.1007/s00440-024-01262-8"],
+		" for the proof"], "a labelled DOI");
+assert.deepStrictEqual(links("10.1214/aop.2024.17."),
+	[["10.1214/aop.2024.17", "https://doi.org/10.1214/aop.2024.17"], "."], "and a bare one");
+assert.deepStrictEqual(links("as in arXiv:2501.01234v2, above"),
+	["as in ", ["arXiv:2501.01234v2", "https://arxiv.org/abs/2501.01234v2"], ", above"],
+	"an arXiv id, version and all");
+assert.deepStrictEqual(links("older: arXiv:math/0309285"),
+	["older: ", ["arXiv:math/0309285", "https://arxiv.org/abs/math/0309285"]],
+	"including the pre-2007 form");
+assert.deepStrictEqual(links("https://doi.org/10.1214/x"),
+	[["https://doi.org/10.1214/x", "https://doi.org/10.1214/x"]],
+	"a DOI already written as an address is matched once, as the address");
 
 // A "$" only opens maths when what follows reads as maths. This is what keeps a
 // news feed's "raised $5 million and $10 million" out of the maths renderer.

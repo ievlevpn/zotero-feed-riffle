@@ -2140,13 +2140,26 @@ function paragraphs(text) {
 // you cannot follow and would have to retype. Split rather than replaced, for
 // two reasons: typography() turns a "--" inside a URL into an en dash, and the
 // full stop that ends the sentence is not part of the address.
-// ponytail: http(s):// and www. only. A bare "doi:10.1234/x" or "arXiv:2501.1"
-// is a link too, but guessing which resolver a reader wants is a second
-// decision, and o already opens the item's own URL.
+// An identifier is an address as much as a URL is: a paper that cites
+// "arXiv:2501.01234" or "doi:10.1007/s00440-024-01262-8" is one click away
+// through the resolver everyone uses for it.
+// ponytail: doi.org and arxiv.org, not a resolver setting. "10." followed by
+// four digits and a slash is a DOI in prose often enough to take it as one.
 // Exported for test.js.
+const linkHref = (raw) => {
+	if (/^https?:\/\//i.test(raw)) return raw;
+	if (/^www\./i.test(raw)) return "https://" + raw;
+	if (/^arxiv:/i.test(raw)) return "https://arxiv.org/abs/" + raw.replace(/^arxiv:\s*/i, "");
+	return "https://doi.org/" + raw.replace(/^doi:\s*/i, "");
+};
+
 function splitLinks(s) {
 	const text = String(s || "");
-	const re = /(?:https?:\/\/|www\.)[^\s<>"'\u201c\u201d]+/gi;
+	const re = new RegExp([
+		/(?:https?:\/\/|www\.)[^\s<>"'\u201c\u201d]+/,          // an address as written
+		/(?:doi:\s*)?10\.\d{4,9}\/[^\s<>"'\u201c\u201d]+/,       // a DOI, labelled or bare
+		/arXiv:\s*(?:\d{4}\.\d{4,5}(?:v\d+)?|[a-z][a-z-]*(?:\.[A-Za-z]{2})?\/\d{7}(?:v\d+)?)/,
+	].map((r) => r.source).join("|"), "gi");
 	const out = [];
 	let at = 0;
 	for (let m; (m = re.exec(text));) {
@@ -2155,7 +2168,7 @@ function splitLinks(s) {
 		const raw = m[0].replace(/[.,;:!?'"\u2019\u201d)\]}]+$/, "");
 		if (!raw) continue;
 		if (m.index > at) out.push({ text: text.slice(at, m.index) });
-		out.push({ text: raw, href: /^www\./i.test(raw) ? "https://" + raw : raw });
+		out.push({ text: raw, href: linkHref(raw) });
 		at = m.index + raw.length;
 		re.lastIndex = at;
 	}

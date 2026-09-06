@@ -369,6 +369,11 @@ as written: the address keeps its own dashes and quotes, which the typographic
 substitutions would have rewritten, and the full stop that ends the sentence
 stays in the sentence.
 
+So are the identifiers that stand in for addresses. `doi:10.1007/s00440-024-01262-8`
+and a bare `10.1214/aop.2024.17` open through doi.org; `arXiv:2501.01234v2` and
+the pre-2007 `arXiv:math/0309285` open through arxiv.org. An abstract that cites
+its predecessor is one click from it.
+
 **Formulas are typeset by KaTeX**, which is bundled with the plugin — the real
 thing, not an approximation: environments, `\left…\right` that stretches to
 what it contains, `\begin{cases}`, author-defined macros, everything a feed's
