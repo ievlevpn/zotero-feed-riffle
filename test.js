@@ -127,7 +127,7 @@ assert.deepStrictEqual(splitAbstract("Summary: The result."), { kind: "", body: 
 
 
 // --- description rendering -------------------------------------------------
-const { typography, paragraphs, unparse, unparserError } = require("./bootstrap.js");
+const { typography, paragraphs, unparse, unparserError, splitLinks } = require("./bootstrap.js");
 
 // TeX ligatures must not reach the reader; a "$" is left alone because outside
 // an academic feed it is money.
@@ -141,6 +141,23 @@ assert.strictEqual(typography("raised $5m"), "raised $5m", "a dollar sign is not
 assert.deepStrictEqual(paragraphs("one\n\ntwo"), ["one", "two"]);
 assert.deepStrictEqual(paragraphs("only one"), ["only one"]);
 assert.deepStrictEqual(paragraphs("  \n\n  "), [], "blank input yields no paragraphs");
+
+// --- addresses written into prose ------------------------------------------
+// A feed that sends plain text sends its links as characters; on a card they
+// have to become links, without the sentence around them coming too.
+const links = (s) => splitLinks(s).map((b) => (b.href ? [b.text, b.href] : b.text));
+assert.deepStrictEqual(links("no links here"), ["no links here"], "prose is left whole");
+assert.deepStrictEqual(links("see https://x.org/a for more"),
+	["see ", ["https://x.org/a", "https://x.org/a"], " for more"], "the address, and the sentence around it");
+assert.deepStrictEqual(links("at https://x.org/a."),
+	["at ", ["https://x.org/a", "https://x.org/a"], "."], "the full stop stays in the sentence");
+assert.deepStrictEqual(links("(see www.x.org/a)"),
+	["(see ", ["www.x.org/a", "https://www.x.org/a"], ")"], "a bare www. gets a scheme to open with");
+assert.deepStrictEqual(links("https://a.org and https://b.org").length, 3, "one link each");
+// The reason this splits rather than replaces: typography() is for prose.
+assert.strictEqual(splitLinks("https://x.org/a--b")[0].href, "https://x.org/a--b",
+	"a double hyphen in an address is not an en dash");
+assert.deepStrictEqual(links(""), [], "and nothing in, nothing out");
 
 // A "$" only opens maths when what follows reads as maths. This is what keeps a
 // news feed's "raised $5 million and $10 million" out of the maths renderer.

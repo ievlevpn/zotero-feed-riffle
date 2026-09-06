@@ -361,6 +361,14 @@ as often a tracking pixel as a picture, and a reader should not phone home for
 every card you flick past. Feed stylesheets are dropped too, so the card keeps
 its own typography. Links open in your browser, not in the riffle window.
 
+**An address written into plain text becomes a link too.** Feeds that send prose
+rather than HTML — arXiv, zbMATH, a mailing list digest — write their links as
+characters, and a link you cannot follow is a link you retype. `http://`,
+`https://` and bare `www.` are picked out of the text and left otherwise exactly
+as written: the address keeps its own dashes and quotes, which the typographic
+substitutions would have rewritten, and the full stop that ends the sentence
+stays in the sentence.
+
 **Formulas are typeset by KaTeX**, which is bundled with the plugin — the real
 thing, not an approximation: environments, `\left…\right` that stretches to
 what it contains, `\begin{cases}`, author-defined macros, everything a feed's

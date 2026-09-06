@@ -2135,6 +2135,34 @@ function paragraphs(text) {
 }
 
 // Text with its formulas typeset, appended into `parent`.
+// A bare address in prose. Feeds that send plain text — arXiv, zbMATH, a mailing
+// list digest — write their links as characters, and on a card that is a link
+// you cannot follow and would have to retype. Split rather than replaced, for
+// two reasons: typography() turns a "--" inside a URL into an en dash, and the
+// full stop that ends the sentence is not part of the address.
+// ponytail: http(s):// and www. only. A bare "doi:10.1234/x" or "arXiv:2501.1"
+// is a link too, but guessing which resolver a reader wants is a second
+// decision, and o already opens the item's own URL.
+// Exported for test.js.
+function splitLinks(s) {
+	const text = String(s || "");
+	const re = /(?:https?:\/\/|www\.)[^\s<>"'\u201c\u201d]+/gi;
+	const out = [];
+	let at = 0;
+	for (let m; (m = re.exec(text));) {
+		// Sentence punctuation clinging to the end of an address, and a closing
+		// bracket the address was written inside of.
+		const raw = m[0].replace(/[.,;:!?'"\u2019\u201d)\]}]+$/, "");
+		if (!raw) continue;
+		if (m.index > at) out.push({ text: text.slice(at, m.index) });
+		out.push({ text: raw, href: /^www\./i.test(raw) ? "https://" + raw : raw });
+		at = m.index + raw.length;
+		re.lastIndex = at;
+	}
+	if (at < text.length) out.push({ text: text.slice(at) });
+	return out;
+}
+
 function inlineInto(doc, parent, text) {
 	for (const run of splitMath(text)) {
 		// An over-long "math" run means an unbalanced delimiter, usually in an
@@ -2142,7 +2170,16 @@ function inlineInto(doc, parent, text) {
 		// rest of the paragraph inside a subscript, where MathML's scriptlevel
 		// shrinks it to unreadable. Falling back to prose is the honest failure.
 		if (run.math && fitsAsMath(run.text)) mathInto(doc, parent, run.text, run.display);
-		else parent.append(typography(deLatex(run.text)));
+		else {
+			for (const bit of splitLinks(run.text)) {
+				// The address goes in as it was written: it is not prose, and the
+				// dashes and quotes in it are its own.
+				if (!bit.href) { parent.append(typography(deLatex(bit.text))); continue; }
+				const a = el(doc, "a", null, bit.text);
+				a.href = bit.href;
+				parent.append(a);
+			}
+		}
 	}
 }
 
@@ -4585,7 +4622,7 @@ function uninstall() {}
 // node-only: lets test.js import the pure helpers; no-op inside Zotero.
 if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
-		splitTags, splitMath, typography, paragraphs, abstractNode, unparse, unparserError,
+		splitTags, splitMath, typography, paragraphs, abstractNode, unparse, unparserError, splitLinks,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
 		prefOn, copyChoices, eatsTail, deckRows, isDeckHere, deckSift, linkKey, indexEntry, rereadSet, setReread,
