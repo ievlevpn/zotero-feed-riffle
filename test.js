@@ -127,7 +127,7 @@ assert.deepStrictEqual(splitAbstract("Summary: The result."), { kind: "", body: 
 
 
 // --- description rendering -------------------------------------------------
-const { typography, paragraphs, unparse, unparserError, splitLinks } = require("./bootstrap.js");
+const { typography, paragraphs, unparse, unparserError, splitLinks, looksMarkup } = require("./bootstrap.js");
 
 // TeX ligatures must not reach the reader; a "$" is left alone because outside
 // an academic feed it is money.
@@ -141,6 +141,20 @@ assert.strictEqual(typography("raised $5m"), "raised $5m", "a dollar sign is not
 assert.deepStrictEqual(paragraphs("one\n\ntwo"), ["one", "two"]);
 assert.deepStrictEqual(paragraphs("only one"), ["only one"]);
 assert.deepStrictEqual(paragraphs("  \n\n  "), [], "blank input yields no paragraphs");
+
+// --- telling markup from a formula the importer walked into ----------------
+// The HTML parser makes a <p> element out of "$1<p<\infty$" as readily as out
+// of a paragraph, and rendering that loses the sentence to the tag it was taken
+// for. Only markup that announces itself is parsed as markup.
+assert.ok(!looksMarkup("Let $1<p<\\infty$ and let $T$ be the operator"),
+	"an inequality that names an HTML element is not markup");
+assert.ok(!looksMarkup("We consider $0<H<1/2$ and $a<b$."), "nor two of them");
+assert.ok(!looksMarkup("no angle brackets at all"), "nor prose");
+assert.ok(looksMarkup("<p>A paragraph.</p>"), "a closing tag is");
+assert.ok(looksMarkup('Continue reading <a href="https://x.org/a">here</a>'),
+	"so is a quoted attribute");
+assert.ok(looksMarkup("One line<br>and another"), "so is a block element written bare");
+assert.ok(!looksMarkup(""), "and nothing is not markup");
 
 // --- addresses written into prose ------------------------------------------
 // A feed that sends plain text sends its links as characters; on a card they
@@ -343,6 +357,16 @@ assert.ok(!importerCut("A tilted variant of $B$ yields a different tangent law."
 	"balanced delimiters and a full stop: whole");
 assert.ok(!importerCut("The grant was worth $2 million"),
 	"one dollar sign is a currency sign, not a cut");
+// Cut inside the first formula, so nothing balanced survives to corroborate the
+// odd "$": all that is left of "Let $1<p<\infty$ be..." is "Let $1".
+// (arXiv 2609.04974, as Zotero's feed importer stored it.)
+assert.ok(importerCut("Let $1"), "a delimiter opened on a fragment of a token");
+// The overreach this accepts: an amount that ends a line and closes nothing
+// reads exactly like a cut. It costs a suggestion box on a card, and money in a
+// maths abstract almost always has a sentence after it.
+assert.ok(importerCut("The prize is $5"), "an amount left hanging reads as one too");
+assert.ok(!importerCut("The grant was worth $2 million and ran for three years"),
+	"but a sentence carrying on past the amount does not");
 
 // --- imgMath: a feed's formulas arrive as pictures, source and all ---------
 assert.strictEqual(imgMath("https://latex.codecogs.com/png.latex?%5Clambda"), "\\lambda",

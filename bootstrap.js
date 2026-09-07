@@ -716,8 +716,16 @@ function importerCut(raw) {
 	// splitMath's judgement rather than a second guess at it here.
 	const odd = (s.replace(/\\\$/g, "").match(/\$/g) || []).length % 2 === 1;
 	const open = odd && splitMath(s).some((r) => r.math);
+	// Cut inside the *first* formula, so there is no second one to corroborate
+	// the odd "$" against: "Let $1" is all that survived "Let $1<p<\infty$".
+	// What tells it from money is where the text stops — a currency sign is
+	// followed by an amount and then more sentence ("worth $2 million"), while
+	// a cut leaves the delimiter opened on a fragment of a token and nothing
+	// after it at all.
+	const tail = s.replace(/\\\$/g, "x").split("$").pop();
+	const stub = odd && !!tail && !/\s/.test(tail);
 	// A tag at the very end is the serialiser's, not the author's last word.
-	return (bogus || open) && !/[.!?)\]}$"”]$/.test(s.replace(/<[^>]*>$/, "").trim());
+	return (bogus || open || stub) && !/[.!?)\]}$"”]$/.test(s.replace(/<[^>]*>$/, "").trim());
 }
 
 // A feed cannot run MathJax, so a site that typesets on the page ships its
@@ -2094,7 +2102,9 @@ function mathFragment(doc, text) {
 		// rest of the paragraph inside a subscript, where MathML's scriptlevel
 		// shrinks it to unreadable. Falling back to text is the honest failure.
 		if (run.math && fitsAsMath(run.text)) mathInto(doc, frag, run.text, run.display);
-		else frag.append(deLatex(run.text)); // text-mode accents and escapes
+		// text-mode accents and escapes, and the same dashes and quotes the
+		// prose gets: "Ornstein--Uhlenbeck" is an en dash in a title too.
+		else frag.append(typography(deLatex(run.text)));
 	}
 	return frag;
 }
@@ -2224,6 +2234,20 @@ function sanitizedFragment(doc, raw, baseURL) {
 // of a formula never produces one.
 const BLOCKS = "p, div, blockquote, ul, ol, li, pre, h1, h2, h3, h4, h5, h6, table";
 
+// A block element is the tell only where the parse that found it was reading
+// markup. "$1<p<\infty$" makes the HTML parser a <p> element too, with the rest
+// of the sentence swallowed as its attributes — so rendering that fragment
+// reopens the exact wound the importer inflicts, and does it to an abstract we
+// may have just gone to the feed to rescue. Real markup says so in ways a
+// mangled formula cannot: a closing tag, an attribute with a quoted value, or a
+// block element written bare. Exported for test.js.
+const looksMarkup = (raw) => {
+	const s = String(raw || "");
+	return /<\/[a-zA-Z][^\s>]*\s*>/.test(s)
+		|| /<[a-zA-Z][^\s>]*\s[^<>]*=\s*["'][^"']*["']/.test(s)
+		|| /<(?:p|div|ul|ol|li|blockquote|pre|h[1-6]|br)\s*\/?>/i.test(s);
+};
+
 // Nor does a formula produce a link with an address in it. Blogs that ship the
 // excerpt as one unwrapped paragraph and a "Continue reading" link — WordPress's
 // default, so a good half of the maths blogs — have no block element in them at
@@ -2282,7 +2306,7 @@ function abstractNode(doc, raw, baseURL) {
 	const box = el(doc, "div", "abs");
 	raw = inlineImgMath(doc, raw);
 
-	const frag = /[<&]/.test(String(raw || "")) ? sanitizedFragment(doc, raw, baseURL) : null;
+	const frag = looksMarkup(raw) ? sanitizedFragment(doc, raw, baseURL) : null;
 	if (frag && frag.querySelector && frag.querySelector(REAL_HTML)) {
 		for (const hidden of frag.querySelectorAll(HIDDEN_TEXT)) hidden.remove();
 		markClassMath(frag);
@@ -4635,7 +4659,7 @@ function uninstall() {}
 // node-only: lets test.js import the pure helpers; no-op inside Zotero.
 if (typeof module !== "undefined") {
 	module.exports = { score, rank, deLatex, splitAbstract, authorLine, shortDate,
-		splitTags, splitMath, typography, paragraphs, abstractNode, unparse, unparserError, splitLinks,
+		splitTags, splitMath, typography, paragraphs, abstractNode, unparse, unparserError, splitLinks, looksMarkup,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
 		prefOn, copyChoices, eatsTail, deckRows, isDeckHere, deckSift, linkKey, indexEntry, rereadSet, setReread,

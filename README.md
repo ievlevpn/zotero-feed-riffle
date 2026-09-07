@@ -280,6 +280,11 @@ Zotero's own *Add to My Library* is still right there.
 
 ## When the importer mangles an item
 
+An arXiv abstract cut inside its very first formula — `Let $1`, all that
+survives `Let $1<p<\infty$` — is caught too: there is no second formula left to
+corroborate the odd `$` against, so the shape of the wreckage is the evidence, a
+delimiter opened on a fragment of a token with nothing after it.
+
 Zotero reads a feed by parsing it as XML. A feed that is not valid XML — junk
 after the document element, an unescaped `&`, a stray tag — leaves the parser's
 own error page in the item's abstract, and a `<` inside a formula can have it
@@ -353,7 +358,13 @@ Feed metadata arrives raw and no two sources format it the same way, so the card
 normalises it before showing you anything.
 
 **Descriptions are rendered, not flattened.** A feed that really sends HTML keeps
-its structure — paragraphs, quotes, lists, headings, links. That HTML is
+its structure — but only a description that announces itself as markup is parsed
+as markup. `$1<p<\infty$` makes an HTML parser a `<p>` element as readily as a
+paragraph does, and rendering that would swallow the sentence as the tag's
+attributes, which is the same wound the importer inflicts. A closing tag, an
+attribute with a quoted value or a bare block element is the tell; an inequality
+that happens to name an element is not one. Where it is markup it keeps its
+structure — paragraphs, quotes, lists, headings, links. That HTML is
 untrusted input, so it goes through Gecko's own sanitizer (`nsIParserUtils`, the
 same service Zotero uses for untrusted note and annotation HTML) rather than
 anything hand-written here. Remote media is dropped: an `<img>` in an RSS item is
