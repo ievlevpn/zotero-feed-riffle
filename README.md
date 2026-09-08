@@ -166,8 +166,11 @@ than where the panel drops you. Nothing to read means the box straight away.
 are simply there — an item with none says so rather than dropping you in the
 box, since the arrows would then be typing. In the box they are typing:
 <kbd>↑</kbd> off its first character is the way back out to the notes, and to
-the cards. <kbd>Esc</kbd> steps out to the bare card for a <kbd>t</kbd> or an
-<kbd>x</kbd>, and the notes come back on the next one.
+the cards. Every other key still means what it means on a card: <kbd>r</kbd>
+deals a random one, <kbd>x</kbd> trashes, <kbd>m</kbd> moves, <kbd>g</kbd> jumps
+— the notes step aside for the key and come back on whatever you land on, so
+there is nothing to step out of first. Only while reading them; in the box a
+letter is a letter.
 <kbd>m</kbd> moves the item to another collection (a move, not a copy: it leaves
 the one you are riffling), <kbd>a</kbd> adds it to one without taking it out of
 this one, and <kbd>x</kbd> puts it in Zotero's trash. Each panel shows its own

@@ -4240,7 +4240,11 @@ function build(w) {
 			} else if (!writing) {
 				hint((noteAll ? [["←/→", "cards", [() => turnCard(-1), () => turnCard(1)]]] : [])
 					.concat(notes.length > 1 ? [["↑↓", "browse", () => walkNotes(1)]] : [])
-					.concat([["⏎", "new note", toBox], ["Esc", "back", back]]));
+					.concat([["⏎", "new note", toBox], ["Esc", "back", back]])
+					// Said once here, because a panel that swallows keys is what
+					// every other panel does and there is nothing else to tell
+					// you this one has stopped.
+					.concat(noteAll ? [["r x m …", "card keys"]] : []));
 			} else {
 				// Nothing to click about a modifier: ⇧⏎ describes the key alone.
 				hint([["⏎", done, () => commit()], ["⇧⏎", "newline"]]
@@ -4380,6 +4384,20 @@ function build(w) {
 			}
 			// Any other key means you have moved on from that chip.
 			if (armed >= 0) { armed = -1; paintChips(); panelHints(); }
+			// With N on, the panel is what the window looks like rather than
+			// something you opened, so a key it has no use for belongs to the
+			// card — r deals a random one, x trashes, m moves, exactly as they
+			// would with no notes up. The panel is the one card's, and the key
+			// may be about to change which card that is, so it closes first and
+			// the event goes on to the card handler; noteFollow puts the notes
+			// back, on whatever you land on or on the same card for the keys
+			// that only look something up. Only while reading — in the box a
+			// letter is a letter.
+			if (stage === 2 && !writing && noteAll) {
+				closePanel();
+				w.setTimeout(noteFollow, 0);
+				return;
+			}
 			e.stopPropagation(); // ordinary typing stays in the box
 		};
 
