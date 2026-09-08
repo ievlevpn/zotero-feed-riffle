@@ -133,6 +133,7 @@ the window opens:
 | **Include subcollections** | what <kbd>s</kbd> does, from the start. Untouched, it still follows Zotero's own *Show Items from Subcollections* |
 | **Always reread this feed from the feed itself** | for a feed whose XML never parses: every deck dealt from it is read from the feed as it is dealt. Feed decks only |
 | **Log sittings to Reading Time** | the question the finish screen asks once, answerable before it asks. Only shown when Reading Time is installed |
+| **Space in Zotero's item list deals from that item** | the Finder's gesture, in the library: select a row, press <kbd>Space</kbd>, and the deck opens on that item. On by default; off gives <kbd>Space</kbd> back to Zotero |
 | **Show the finish summary** | the same switch the finish screen carries, in the place you would look for it |
 
 Each takes effect on the deck you are in, not just the next one — a default you
@@ -143,6 +144,16 @@ Two of them are collection settings and two are feed ones, so the sheet shows
 what the deck you are in can actually use.
 
 ## Riffling a collection
+
+<kbd>Space</kbd> on a row in Zotero's own items list is the quickest way in: the
+deck opens on the item you pressed it on, the way <kbd>Space</kbd> opens the file
+you are pointing at in the Finder. The deck is the collection selected in the
+collections pane, or — from a saved search, a library root or the trash, where
+the row you found it under is no deck at all — the first collection the item is
+actually in. A feed item deals its feed. Selecting an attachment or a note deals
+the paper it belongs to, since a deck is made of top-level items. It is a
+key you can have back: the help sheet has the switch, and the pref behind it is
+`extensions.zotero.feedRiffle.spaceOpens`.
 
 Right-click a collection → **Riffle This Collection…** deals its items out the
 same way — or **Tools → Riffle a Collection…**, which opens the one you riffled

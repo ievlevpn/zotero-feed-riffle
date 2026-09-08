@@ -22,6 +22,7 @@ const STATS_PREF = "feedRiffle.summary";       // false: the finish summary stay
 const RT_PREF = "feedRiffle.readingTime";      // unset: ask once; then true or false
 const PAGES_PREF = "feedRiffle.pagesFirst";    // a collection deck opens on pages, not text
 const REREAD_PREF = "feedRiffle.rereadFeeds"; // feeds always read from the feed itself
+const SPACE_PREF = "feedRiffle.spaceOpens";    // Space in Zotero's items list deals from the item
 const DEEP_PREF = "feedRiffle.subcollections"; // unset: follow Zotero's own View setting
 const RECENT_MAX = 9; // as many as there are number keys
 const BASE_PX = 15;   // reading size at scale 1, before Zotero's own setting
@@ -65,6 +66,7 @@ let win = null;        // the one riffle window
 
 let ids = [];          // unread feed item ids, newest first
 let cursor = 0;        // index into ids of the card on screen
+let startAt = null;    // itemID the next deal should open on, rather than the top
 let total = 0;         // ids.length when the window opened, for the counter
 const cache = new Map(); // itemID → Zotero.Item, filled a window at a time
 let colls = [];        // [{ id, path }] every collection you can file into
@@ -2447,7 +2449,13 @@ async function reload() {
 		await loadKatex();
 		ids = isFeedMode() ? await loadIDs(scopeLib) : await loadCollectionIDs(scopeColl);
 		total = ids.length;
-		cursor = 0;
+		// Dealt from a row in Zotero's items list: start on that card. Asked for
+		// once and then forgotten, so the next deal starts at the top again, and
+		// an item the deck does not hold — filed elsewhere, or already read —
+		// leaves you at the top rather than nowhere.
+		const want = startAt ? ids.indexOf(startAt) : -1;
+		startAt = null;
+		cursor = want > 0 ? want : 0;
 		cache.clear();
 		attachments.clear();
 		// A new deal is a good moment to forget a feed we downloaded: Zotero has
@@ -2464,7 +2472,7 @@ async function reload() {
 		}
 		allTags = await loadTags();
 		libKeys = await loadLibraryKeys();
-		await hydrate(0);
+		await hydrate(cursor);
 	}
 	catch (e) {
 		oops(e);
@@ -2765,6 +2773,11 @@ function build(w) {
 					doDeep();
 				});
 		}
+		// Not about this window at all, but this is the only settings sheet there
+		// is, and a key you cannot find the switch for is a key you cannot undo.
+		toggle("Space in Zotero's item list deals from that item",
+			() => prefOn(SPACE_PREF, true),
+			(on) => safe(() => Zotero.Prefs.set(SPACE_PREF, on)));
 		toggle("Show the finish summary", summaryOn,
 			(on) => safe(() => Zotero.Prefs.set(STATS_PREF, on)));
 
@@ -4567,6 +4580,62 @@ function riffleSelected(window) {
 	return open(null);
 }
 
+// Space on a row in Zotero's items list deals from that item — the Finder's
+// gesture, on a list that is a pile of papers. Which deck it deals is the same
+// question the toolbar button answers, and the item it lands on is the row you
+// pressed it on.
+function riffleItem(window, item) {
+	// An attachment or a note is selected as often as the paper is; the deck is
+	// made of top-level items either way.
+	const top = safe(() => item.parentItem, null) || item;
+	startAt = top.id;
+	if (safe(() => top.isFeedItem, false)) return open(top.libraryID);
+	const row = paneRow(window);
+	if (rowIsCollection(row)) return openCollection(safe(() => row.ref.id, null));
+	// Selected from a search, a library root or the trash: the row it was found
+	// under is no deck, so deal the collection the item is actually in.
+	const c = safe(() => top.getCollections(), [])[0];
+	if (c) return openCollection(c);
+	startAt = null;
+	return safe(() => Services.prompt.alert(window, "Feed Riffle",
+		"That item is not in a collection, so there is no deck to deal it from."));
+}
+
+// Capture, and only from the items tree: Space belongs to a text field while
+// you are in one, and to Zotero's own list handling everywhere else. Off with
+// a pref for anyone whose fingers already mean something by it.
+function addSpaceKey(window) {
+	removeSpaceKey(window);
+	const onKey = (e) => {
+		if (e.key !== " " || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+		if (!prefOn(SPACE_PREF, true)) return;
+		const el = window.document.activeElement;
+		if (!el || !el.closest) return;
+		// A space typed into the search box, a note or a field is a space.
+		const tag = String(el.localName || "").toLowerCase();
+		if (tag === "input" || tag === "textarea" || el.isContentEditable) return;
+		// The tree's own id has changed between Zotero versions; the pane around
+		// it has not, and the tree inside it is named after itself either way.
+		if (!el.closest("#zotero-items-tree, [id^='item-tree']")) return;
+		const item = safe(() => window.ZoteroPane.getSelectedItems(), [])[0];
+		if (!item) return;
+		e.preventDefault();
+		e.stopPropagation();
+		safe(() => riffleItem(window, item));
+	};
+	window.document.addEventListener("keydown", onKey, true);
+	window._riffleSpace = onKey;
+}
+
+function removeSpaceKey(window) {
+	safe(() => {
+		if (window._riffleSpace) {
+			window.document.removeEventListener("keydown", window._riffleSpace, true);
+			window._riffleSpace = null;
+		}
+	});
+}
+
 // Zotero 7 has no toolbar API, so this is DOM: a XUL button next to New
 // Collection, in front of the spacer that holds the search button to the right.
 function addButton(window) {
@@ -4646,12 +4715,14 @@ function startup({ id, rootURI: uri }) {
 function onMainWindowLoad({ window }) {
 	safe(() => window.MozXULElement.insertFTLIfNeeded("feed-riffle.ftl"));
 	safe(() => addButton(window));
+	safe(() => addSpaceKey(window));
 }
 
 // The window is going away, but an uninstall while it stays open is not — and
 // that path goes through shutdown() below. Both have to take the button out.
 function onMainWindowUnload({ window }) {
 	removeButton(window);
+	removeSpaceKey(window);
 }
 
 function shutdown() {
@@ -4660,7 +4731,9 @@ function shutdown() {
 	menuID = feedMenuID = null;
 	// The menus are Zotero's to take back; the button is ours, and a window
 	// that outlives the plugin would otherwise keep a dead one.
-	safe(() => { for (const w of Zotero.getMainWindows()) removeButton(w); });
+	safe(() => {
+		for (const w of Zotero.getMainWindows()) { removeButton(w); removeSpaceKey(w); }
+	});
 	if (win && !win.closed) { safe(() => saveState(win)); safe(() => win.close()); }
 	win = null;
 	ids = [];
