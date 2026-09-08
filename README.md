@@ -40,7 +40,7 @@ Each card shows the title, authors, date and abstract.
 | <kbd>f</kbd> | switch deck — any feed or any collection (or click the name) |
 | <kbd>o</kbd> | open the paper in your browser |
 | <kbd>Shift</kbd>+<kbd>O</kbd> | show the item in Zotero's own items list |
-| <kbd>c</kbd> | copy something off the card — link, reference, DOI, title, abstract |
+| <kbd>c</kbd> | copy something off the card — link, reference, DOI, citation key, title, abstract |
 | <kbd>Shift</kbd>+<kbd>F</kbd> | reread this deck's cards straight from the feed, when the importer's copies are mangled or thin |
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
 | <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> | text bigger, smaller, reset (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> too) |
@@ -201,9 +201,17 @@ announcement, since the copy is the one carrying your collections, tags and
 notes.
 
 <kbd>c</kbd> opens a short list of what there is to copy: a reference line, the
-link, the DOI, the title, the abstract. Each row shows what it would put in the
-clipboard, and a field the feed never filled in is simply not a row — a menu of
-five things you can paste beats one of nine where four do nothing.
+link, the DOI, the citation key, the title, the abstract. Each row shows what it
+would put in the clipboard, and a field the feed never filled in is simply not a
+row — a menu of five things you can paste beats one of nine where four do
+nothing.
+
+The citation key is Better BibTeX's own where that plugin is installed, since
+that is the key you actually cite with and any other would be wrong. Failing
+that it is made the way you would make one by hand — first author, year, first
+word of the title that carries meaning: `lowther2023integral`. A feed item has no
+key of its own, so if the paper is already in your library the key of the copy
+you have is offered: that is the item a citation would point at anyway.
 
 Tags Zotero has given a colour keep it, on the card and in the tag box, and come
 first in its order, the way they do in the items list.

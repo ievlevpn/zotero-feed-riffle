@@ -908,7 +908,48 @@ function shortDate(d) {
 // it feels like, so a field that is not there is no row rather than an empty
 // one — a menu of five things you can actually paste beats one of nine where
 // four do nothing. Exported for test.js.
-function copyChoices({ title, authors, year, doi, url, abstract }) {
+// A citation key the way everyone writes one by hand: first author, year, first
+// word of the title that carries any meaning. Better BibTeX's own key is used
+// instead wherever there is one — see citeKey() — so this is for the items that
+// have none, which on a feed deck is all of them.
+// ponytail: one pattern, no formula setting. Someone who wants their own
+// pattern has Better BibTeX, and this defers to it.
+// Exported for test.js.
+const KEY_SKIP = new Set(["a", "an", "the", "on", "of", "in", "for", "and", "to",
+	"with", "some", "new", "note", "notes"]);
+
+function makeKey(lastName, year, title) {
+	const plain = (s) => norm(deLatex(String(s || "")))
+		.normalize("NFD").replace(/[^a-zA-Z0-9 ]/g, "").trim();
+	const who = plain(lastName).split(/\s+/).filter(Boolean).pop() || "";
+	const word = plain(title).split(/\s+/).filter((w) => w && !KEY_SKIP.has(w))[0] || "";
+	const key = who.toLowerCase() + (year || "") + word.toLowerCase();
+	// A key made of nothing is not a key: no author and no title leaves the
+	// year, which nobody would cite by.
+	return who || word ? key : "";
+}
+
+// Better BibTeX keeps the citation keys where it is installed, and its key is
+// the one you actually cite with — copying a different one from here would be
+// wrong in the only way that matters. Looked up at the moment of use rather
+// than held onto, the same care Reading Time gets and for the same reason: a
+// plugin that is not there this second was there last second. A feed item has
+// no key of its own, but the copy already in your library does, and that is the
+// item a citation would point at anyway.
+function citeKey(item) {
+	if (!item) return "";
+	const copy = isFeedMode() ? libraryCopy(item) : null;
+	const id = (copy && copy.id) || item.id;
+	const row = safe(() => Zotero.BetterBibTeX.KeyManager.get(id), null);
+	const got = row && (row.citationKey || row.citekey);
+	if (got) return String(got);
+	const who = safe(() => item.getCreators(), [])[0] || {};
+	return makeKey(who.lastName || who.name || "",
+		shortDate(safe(() => item.getField("date"), "") || "").slice(0, 4),
+		safe(() => item.getField("title"), ""));
+}
+
+function copyChoices({ title, authors, year, doi, url, abstract, key }) {
 	const out = [];
 	const ref = [authors, year && "(" + year + ")", title].filter(Boolean).join(" ");
 	if (ref) out.push({ name: "Reference", text: /[.!?]$/.test(ref) ? ref : ref + "." });
@@ -917,6 +958,7 @@ function copyChoices({ title, authors, year, doi, url, abstract }) {
 	const link = url || (doi && "https://doi.org/" + doi);
 	if (link) out.push({ name: "Link", text: link });
 	if (doi) out.push({ name: "DOI", text: doi });
+	if (key) out.push({ name: "Citation key", text: key });
 	if (title) out.push({ name: "Title", text: title });
 	if (abstract) out.push({ name: "Abstract", text: abstract });
 	return out;
@@ -2647,6 +2689,7 @@ function build(w) {
 			doi: safe(() => item.getField("DOI"), "") || "",
 			url: safe(() => item.getField("url"), "") || "",
 			abstract: splitAbstract(safe(() => item.getField("abstractNote"), "")).body,
+			key: citeKey(item),
 		}).map((c) => ({ ...c, n: oneLine(c.text) }));
 		if (!rows.length) return flash("Nothing on this card to copy");
 		pickMenu({
@@ -4769,6 +4812,6 @@ if (typeof module !== "undefined") {
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse, unparserError, splitLinks, looksMarkup,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
-		prefOn, copyChoices, eatsTail, deckRows, isDeckHere, deckSift, linkKey, indexEntry, rereadSet, setReread,
+		prefOn, copyChoices, makeKey, eatsTail, deckRows, isDeckHere, deckSift, linkKey, indexEntry, rereadSet, setReread,
 		noteHTML, inlineNote, bankTime, endSitting, stat, statReset };
 }

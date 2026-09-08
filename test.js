@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift, linkKey, indexEntry, rereadSet, setReread } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, makeKey, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift, linkKey, indexEntry, rereadSet, setReread } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -367,6 +367,25 @@ assert.ok(importerCut("Let $1"), "a delimiter opened on a fragment of a token");
 assert.ok(importerCut("The prize is $5"), "an amount left hanging reads as one too");
 assert.ok(!importerCut("The grant was worth $2 million and ran for three years"),
 	"but a sentence carrying on past the amount does not");
+
+// --- a citation key for an item that has none ------------------------------
+// First author, year, first word of the title that carries any meaning.
+assert.strictEqual(makeKey("Lowther", "2023", "On The Integral"), "lowther2023integral",
+	"the article and the preposition are not the word anyone would cite by");
+assert.strictEqual(makeKey("Sch\u00f6tz", "2024", "Rough paths"), "schotz2024rough",
+	"an umlaut is folded, not dropped");
+assert.strictEqual(makeKey("van Neerven", "2026", "Dimension-free calculus"),
+	"neerven2026dimensionfree", "the last word of a compound surname, and no hyphen");
+assert.strictEqual(makeKey("", "2026", "A note on cut loci"), "2026cut",
+	"no author is still a key, if the title says anything");
+assert.strictEqual(makeKey("", "2026", ""), "", "but a bare year is not a key");
+
+// The copy menu offers it, and only when there is one.
+const withKey = copyChoices({ title: "T", key: "lowther2023integral" });
+assert.ok(withKey.some((c) => c.name === "Citation key" && c.text === "lowther2023integral"),
+	"the key is one of the rows");
+assert.ok(!copyChoices({ title: "T" }).some((c) => c.name === "Citation key"),
+	"and no row where there is no key");
 
 // --- imgMath: a feed's formulas arrive as pictures, source and all ---------
 assert.strictEqual(imgMath("https://latex.codecogs.com/png.latex?%5Clambda"), "\\lambda",
