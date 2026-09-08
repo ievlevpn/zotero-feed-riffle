@@ -3823,7 +3823,11 @@ function build(w) {
 	// With N on, the notes follow the deck instead of being asked for card by
 	// card. Not on the way out: the finish screen is not a card.
 	const noteFollow = () => {
-		if (noteAll && !panel && !ending && cursor < ids.length) openNotes(true);
+		// Never on top of a picker. The notes take the focus when they open, and
+		// a jump box left up behind them answers to nothing: its own keys never
+		// fire, and the card handler stands down while a menu is open. That was
+		// a window you could only get out of with the mouse.
+		if (noteAll && !panel && !menu && !ending && cursor < ids.length) openNotes(true);
 	};
 
 	function openPanel(job) {
@@ -4442,7 +4446,19 @@ function build(w) {
 	// reinstall the new sandbox still has to be able to unhook the old one.
 	safe(() => { if (w._riffleKey) doc.removeEventListener("keydown", w._riffleKey); });
 	const keyHandler = (e) => {
-		if (panel || menu) return; // the panel or feed picker handled it
+		if (panel || menu) {
+			// Each handles its own keys — but only while the focus is inside it.
+			// A Tab, a click that landed nowhere, a redraw underneath: the focus
+			// wanders out, and then every key including Escape arrives here to be
+			// dropped, leaving a window that answers only to the mouse. Escape
+			// closes the thing that is up; anything else puts the focus back in
+			// it, at the cost of the one keystroke that found the problem.
+			const box = menu || panel;
+			if (box && box.contains && box.contains(e.target)) return;
+			e.preventDefault();
+			if (e.key === "Escape") return menu ? closeFeeds() : (shutPanel && shutPanel());
+			return safe(() => (box.querySelector("input, textarea") || box).focus());
+		}
 		// Typing in the end screen's note field is typing, not shortcuts. Enter
 		// and Esc still mean what they mean here — they leave the field first,
 		// then do it, and the note is already saved either way.
