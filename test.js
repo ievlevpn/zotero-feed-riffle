@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, makeKey, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift, linkKey, indexEntry, rereadSet, setReread } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, makeKey, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift, deckKind, parseGroups, writeGroups, toggleGroup, linkKey, indexEntry, rereadSet, setReread } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -715,15 +715,57 @@ assert.deepStrictEqual(deckRows(false, FEEDS, COLS).map((r) => r.name),
 	["Reading list", "All feeds", "arXiv"], "collection deck lists collections first");
 assert.deepStrictEqual(deckRows(true, FEEDS, COLS).map((r) => r.coll),
 	[false, false, true], "every row says which half it came from");
+// --- groups: our own folders for feeds -------------------------------------
+// One pref, one line each, tab-separated, hand-editable — so a half-finished
+// edit has to read as nothing rather than as a group.
+assert.deepStrictEqual(parseGroups("Probability\thttps://a\thttps://b"),
+	[{ name: "Probability", urls: ["https://a", "https://b"] }], "a name and its feeds");
+assert.deepStrictEqual(parseGroups("Probability\thttps://a\nBlogs\thttps://c"),
+	[{ name: "Probability", urls: ["https://a"] }, { name: "Blogs", urls: ["https://c"] }],
+	"one line each");
+assert.deepStrictEqual(parseGroups("Empty\n\n\thttps://a\n"), [],
+	"a name with no feeds and a feed with no name are both nothing");
+assert.strictEqual(writeGroups(parseGroups("A\thttps://a\nB\thttps://b")),
+	"A\thttps://a\nB\thttps://b", "and it round-trips");
+assert.strictEqual(writeGroups([{ name: "Gone", urls: [] }]), "",
+	"a group emptied of feeds is not written back");
+
+// In, out, and made on the way in.
+let gs = [];
+let r0 = toggleGroup(gs, "Probability", "https://a");
+assert.deepStrictEqual(r0.list, [{ name: "Probability", urls: ["https://a"] }], "made by adding to it");
+assert.ok(r0.added);
+let r1 = toggleGroup(r0.list, "probability", "https://b");
+assert.deepStrictEqual(r1.list[0].urls, ["https://a", "https://b"],
+	"matched by name, whatever the case");
+let r2 = toggleGroup(r1.list, "Probability", "https://a");
+assert.deepStrictEqual(r2.list[0].urls, ["https://b"], "and the same call takes it out again");
+assert.ok(!r2.added);
+assert.deepStrictEqual(toggleGroup(r2.list, "Probability", "https://b").list, [],
+	"the last feed out empties the group away");
+assert.deepStrictEqual(toggleGroup([], "  ", "https://a").list, [], "a nameless group is not made");
+
+// A group is a row like any other, and first in the list.
+const GROUPS = [{ id: "Probability", name: "Probability · 2 feeds", n: 73, group: true }];
+const withGroups = deckRows(true, FEEDS, COLS, GROUPS);
+assert.deepStrictEqual(withGroups.map((r) => r.name),
+	["Probability · 2 feeds", "All feeds", "arXiv", "Reading list"], "groups come first");
+assert.deepStrictEqual(withGroups.map(deckKind), ["g", "f", "f", "c"], "each row says which it is");
+assert.ok(isDeckHere(withGroups[0], true, null, "Probability"), "the group you are riffling");
+assert.ok(!isDeckHere(withGroups[1], true, null, "Probability"),
+	"and no feed is the deck while a group is, not even one holding the card");
+assert.ok(isDeckHere(withGroups[1], true, null, null), "with no group, the feed is the deck again");
+
 // "@f" and "@c" keep the picker to one half of the list; anything else is a
 // plain query over both.
-assert.deepStrictEqual(deckSift("arxiv"), { q: "arxiv", coll: null }, "no prefix: everything");
-assert.deepStrictEqual(deckSift("@f"), { q: "", coll: false }, "@f alone: every feed");
-assert.deepStrictEqual(deckSift("@f arx"), { q: "arx", coll: false }, "and the rest is the query");
-assert.deepStrictEqual(deckSift("@Farx"), { q: "arx", coll: false }, "the space is optional, the case is not fussy");
-assert.deepStrictEqual(deckSift("@c rough"), { q: "rough", coll: true }, "@c is the other half");
-assert.deepStrictEqual(deckSift("a@f"), { q: "a@f", coll: null }, "only in front, so an @ mid-query is just text");
-const half = deckRows(true, FEEDS, COLS).filter((r) => r.coll === deckSift("@f").coll);
+assert.deepStrictEqual(deckSift("arxiv"), { q: "arxiv", kind: null }, "no prefix: everything");
+assert.deepStrictEqual(deckSift("@f"), { q: "", kind: "f" }, "@f alone: every feed");
+assert.deepStrictEqual(deckSift("@f arx"), { q: "arx", kind: "f" }, "and the rest is the query");
+assert.deepStrictEqual(deckSift("@Farx"), { q: "arx", kind: "f" }, "the space is optional, the case is not fussy");
+assert.deepStrictEqual(deckSift("@c rough"), { q: "rough", kind: "c" }, "@c is the other third");
+assert.deepStrictEqual(deckSift("@g"), { q: "", kind: "g" }, "and @g is the groups");
+assert.deepStrictEqual(deckSift("a@f"), { q: "a@f", kind: null }, "only in front, so an @ mid-query is just text");
+const half = deckRows(true, FEEDS, COLS).filter((r) => deckKind(r) === deckSift("@f").kind);
 assert.deepStrictEqual(half.map((r) => r.name), ["All feeds", "arXiv"], "which is what the picker filters on");
 
 // A feed's libraryID and a collection's id are different numbers that can be

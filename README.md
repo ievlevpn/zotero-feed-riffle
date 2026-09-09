@@ -41,6 +41,7 @@ Each card shows the title, authors, date and abstract.
 | <kbd>o</kbd> | open the paper in your browser |
 | <kbd>Shift</kbd>+<kbd>O</kbd> | show the item in Zotero's own items list |
 | <kbd>c</kbd> | copy something off the card — link, reference, DOI, citation key, title, abstract |
+| <kbd>Shift</kbd>+<kbd>G</kbd> | put this feed in a group, or take it out — groups are folders Zotero does not have |
 | <kbd>Shift</kbd>+<kbd>R</kbd> | ask Zotero to fetch the feed again, then deal what arrived — your place is kept |
 | <kbd>Shift</kbd>+<kbd>F</kbd> | reread this deck's cards straight from the feed, when the importer's copies are mangled or thin |
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
@@ -300,6 +301,45 @@ Available PDF* (the DOI, then the landing page — an arXiv abstract page
 advertises its PDF, so no DOI is needed), in the background, after the card has
 already flicked away. For the handful of papers that deserve full metadata,
 Zotero's own *Add to My Library* is still right there.
+
+## Groups of feeds
+
+Zotero has no folders for feeds, so this window keeps its own. A group is a name
+and a set of feeds, and — the point of it — **a group is a deck**: pick
+*Probability* and arXiv math.PR, zbMATH and MathOverflow come out as one pile to
+clear in one sitting, filed and undone and timed exactly like any other feed
+deck.
+
+<kbd>Shift</kbd>+<kbd>G</kbd> on a card puts the feed it came from into a group.
+It opens the same dropdown everything else uses, listing the groups this feed is
+already in with a ✓ and the ones it is not; picking one toggles it. Type a name
+that does not exist yet and the last row offers to make it. A feed can be in as
+many groups as you like — an arXiv feed can be *Probability* and *Daily* at once,
+which is the part a folder tree could not do anyway.
+
+Groups sit at the top of the <kbd>f</kbd> picker, above the feeds, with the
+number of feeds in each and what is unread across them:
+
+```
+ Search feeds, groups and collections (@f, @c, @g)…
+ Probability · 3 feeds              87
+ Blogs · 4 feeds                    12
+ All feeds                         134
+ arXiv math.PR                      51
+```
+
+`@g` keeps the list to groups, the way `@f` and `@c` do for feeds and
+collections. While you are riffling one, the header carries both the deck and
+the feed the card in front of you came from — *Probability › arXiv math.PR* —
+since in a group deck neither says it alone.
+
+The groups live in one pref, `extensions.zotero.feedRiffle.groups`: one line per
+group, the name first, then the feed addresses, tab-separated. Addresses rather
+than library ids, so removing a feed in Zotero and adding it back keeps it in its
+groups. A group whose feeds have all gone is not shown but is not forgotten
+either, in case the feed comes back. Nothing here appears in Zotero's own
+sidebar — we cannot put it there, and a second place to see your feeds is a
+second place to keep in sync.
 
 ## Fetching the feed again
 

@@ -21,6 +21,7 @@ const DECK_PREF = "feedRiffle.lastDeck";       // collection id last riffled
 const STATS_PREF = "feedRiffle.summary";       // false: the finish summary stays off
 const RT_PREF = "feedRiffle.readingTime";      // unset: ask once; then true or false
 const PAGES_PREF = "feedRiffle.pagesFirst";    // a collection deck opens on pages, not text
+const GROUPS_PREF = "feedRiffle.groups";       // our own folders for feeds, which Zotero has none of
 const REREAD_PREF = "feedRiffle.rereadFeeds"; // feeds always read from the feed itself
 const SPACE_PREF = "feedRiffle.spaceOpens";    // Space in Zotero's items list deals from the item
 const DEEP_PREF = "feedRiffle.subcollections"; // unset: follow Zotero's own View setting
@@ -76,6 +77,7 @@ let undoStack = [];    // {id, revert} — revert absent for a discard or a skip
 let deckTitles = null; // itemID → title for the whole deck, read on the first g
 let scopeLib = null;   // feed libraryID to riffle, or null for every feed
 let scopeColl = null;  // collection id to riffle instead, when riffling one
+let scopeGroup = null; // a group of feeds dealt as one deck, by name
 // Which deck is on screen. Everything around the cards — the window, the
 // typography, the panel, undo, the animation — is the same either way; a mode
 // is only the handful of places where a feed and a collection differ.
@@ -1051,7 +1053,11 @@ function features(main) {
 
 // Unread feed items, newest first. Only the ids: hydrating 2000-odd items to
 // show one card would make opening the window the slow part of the workflow.
-async function loadIDs(libraryID) {
+async function loadIDs(scope) {
+	// One feed, several of them for a group, or none at all for every feed.
+	const libs = Array.isArray(scope) ? scope : (scope ? [scope] : []);
+	// A group whose feeds have all gone deals nothing, rather than everything.
+	if (Array.isArray(scope) && !libs.length) return [];
 	const args = [];
 	let sql = "SELECT i.itemID FROM feedItems fi "
 		+ "JOIN items i ON i.itemID = fi.itemID "
@@ -1059,9 +1065,9 @@ async function loadIDs(libraryID) {
 		+ "(SELECT fieldID FROM fields WHERE fieldName = 'date') "
 		+ "LEFT JOIN itemDataValues v ON v.valueID = d.valueID "
 		+ "WHERE fi.readTime IS NULL";
-	if (libraryID) {
-		sql += " AND i.libraryID = ?";
-		args.push(libraryID);
+	if (libs.length) {
+		sql += " AND i.libraryID IN (" + libs.map(() => "?").join(",") + ")";
+		args.push(...libs);
 	}
 	// The date field is stored ISO-first, so a lexical sort is a date sort.
 	sql += " ORDER BY v.value DESC, i.itemID DESC";
@@ -1130,11 +1136,15 @@ function feedRows() {
 // Everything f can deal from: both halves of the list, the one you are in
 // first, each row saying which half it came from so picking it knows whether
 // it is switching feed, collection, or mode.
-function deckRows(feed, feeds, cols) {
+function deckRows(feed, feeds, cols, groups) {
 	const tag = (rows, coll) => rows.map((r) => ({ ...r, coll }));
-	return feed
-		? tag(feeds, false).concat(tag(cols, true))
-		: tag(cols, true).concat(tag(feeds, false));
+	// Groups first, whichever half you are in: there are a handful of them
+	// against a library's worth of everything else, and a list you keep is a
+	// list you meant.
+	return (groups || []).map((r) => ({ ...r, group: true }))
+		.concat(feed
+			? tag(feeds, false).concat(tag(cols, true))
+			: tag(cols, true).concat(tag(feeds, false)));
 }
 
 // "@f" and "@c" in front of the query keep the list to one half of it: with a
@@ -1144,14 +1154,22 @@ function deckRows(feed, feeds, cols) {
 // ponytail: a collection actually named "@foo" is now searched as "oo" — find
 // it by any other three letters in its name.
 function deckSift(q) {
-	const m = /^@([fc])\s*/i.exec(q);
-	return m ? { q: q.slice(m[0].length), coll: m[1].toLowerCase() === "c" } : { q, coll: null };
+	const m = /^@([fcg])\s*/i.exec(q);
+	return m ? { q: q.slice(m[0].length), kind: m[1].toLowerCase() } : { q, kind: null };
 }
+
+// Which half — or third — of the list a row is in, against what @f, @c and @g
+// asked for. Exported for test.js.
+const deckKind = (r) => (r.group ? "g" : r.coll ? "c" : "f");
 
 // The row for the deck on screen, which is the one the picker opens on: `here`
 // is a libraryID in feed mode and a collection id in collection mode, and the
 // two can collide, so which half a row is in decides before the id does.
-const isDeckHere = (r, feed, here) => r.coll === !feed && r.id === here;
+const isDeckHere = (r, feed, here, hereGroup) => (r.group
+	? r.id === hereGroup
+	// A group is dealt, so no single feed is the deck even though one of them
+	// holds the card in front of you.
+	: !hereGroup && r.coll === !feed && r.id === here);
 
 
 // --- reading the feed ourselves ---------------------------------------------
@@ -1280,6 +1298,73 @@ function setReread(libraryID, on) {
 	safe(() => Zotero.Prefs.set(REREAD_PREF, [...set].join("\n")));
 }
 
+// --- groups ----------------------------------------------------------------
+//
+// Zotero has no folders for feeds, so these are ours: a name, and the addresses
+// of the feeds in it. A feed can be in as many as you like, an address is what
+// they are kept by — a feed removed and added back in Zotero is a new library
+// id and the same address — and the whole thing is one pref you can edit by
+// hand, tab-separated because a feed name can hold anything else.
+// Exported for test.js.
+function parseGroups(text) {
+	return String(text || "").split("\n").map((line) => {
+		const bits = line.split("\t").map((x) => x.trim()).filter(Boolean);
+		const name = bits.shift();
+		// A group with nothing in it is not a group; a name with no group is not
+		// either. Both are what a half-finished hand edit looks like.
+		return name && bits.length ? { name, urls: bits } : null;
+	}).filter(Boolean);
+}
+
+function writeGroups(list) {
+	return list.filter((g) => g.name && g.urls.length)
+		.map((g) => [g.name].concat(g.urls).join("\t")).join("\n");
+}
+
+// A name is a line in a pref, so it cannot hold what separates them.
+const groupName = (s) => String(s || "").replace(/[\t\n\r]+/g, " ").trim();
+
+const readGroups = () => parseGroups(safe(() => Zotero.Prefs.get(GROUPS_PREF), ""));
+
+// In or out, and which it ended up being. Exported for test.js.
+function toggleGroup(list, name, url) {
+	const want = groupName(name);
+	if (!want || !url) return { list, added: false };
+	const g = list.find((x) => x.name.toLowerCase() === want.toLowerCase());
+	if (!g) return { list: list.concat([{ name: want, urls: [url] }]), added: true };
+	const had = g.urls.includes(url);
+	g.urls = had ? g.urls.filter((u) => u !== url) : g.urls.concat([url]);
+	// Emptied by taking the last feed out: writeGroups drops it on the way past.
+	return { list: list.filter((x) => x.urls.length), added: !had };
+}
+
+function setGrouped(name, url) {
+	const { list, added } = toggleGroup(readGroups(), name, url);
+	safe(() => Zotero.Prefs.set(GROUPS_PREF, writeGroups(list)));
+	return added;
+}
+
+// A group as the picker shows it: the feeds in it that still exist, and what is
+// unread across the lot. A group whose feeds have all gone is not drawn — the
+// pref keeps it, in case the feed comes back.
+function groupRows() {
+	const feeds = safe(() => Zotero.Feeds.getAll(), []) || [];
+	const byURL = new Map(feeds.map((f) => [String(f.url || "").trim().toLowerCase(), f]));
+	return readGroups().map((g) => {
+		const mine = g.urls.map((u) => byURL.get(u)).filter(Boolean);
+		if (!mine.length) return null;
+		return {
+			id: g.name,
+			name: g.name + " \u00b7 " + mine.length + (mine.length === 1 ? " feed" : " feeds"),
+			group: true,
+			libs: mine.map((f) => f.libraryID),
+			n: mine.reduce((sum, f) => sum + safe(() => f.unreadCount, 0), 0),
+		};
+	}).filter(Boolean);
+}
+
+const groupLibs = (name) => (groupRows().find((r) => r.id === name) || {}).libs || [];
+
 // Every card in this deck that came from the same feed, reread from the one
 // document already fetched. A feed carries only its most recent entries while
 // Zotero's copy of it accumulates, so an item the feed has forgotten is left
@@ -1317,13 +1402,15 @@ async function refetchDeck(doc, libraryID, deckIDs) {
 // and the deck is dealt again around them. The feed is the one the card came
 // from; with no card to go on, the deck's own scope, and an all-feeds deck at
 // its end refreshes them all, which is what "all feeds" means everywhere else.
-async function refreshFeeds(libraryID) {
-	const one = libraryID && safe(() => Zotero.Feeds.get(libraryID), null);
-	if (one) {
-		await one.updateFeed();
+async function refreshFeeds(scope) {
+	const libs = Array.isArray(scope) ? scope : (scope ? [scope] : []);
+	const named = libs.map((id) => safe(() => Zotero.Feeds.get(id), null)).filter(Boolean);
+	if (named.length) {
+		await Promise.all(named.map((f) => Promise.resolve(safe(() => f.updateFeed()))
+			.catch(oops)));
 		return true;
 	}
-	if (libraryID) return false;
+	if (libs.length) return false;
 	const all = safe(() => Zotero.Feeds.getAll(), []) || [];
 	if (!all.length) return false;
 	// One that is down should not take the rest with it.
@@ -2439,6 +2526,7 @@ function openCollection(collectionID) {
 	mode = "collection";
 	scopeColl = collectionID;
 	scopeLib = null;
+	scopeGroup = null;
 	return openWindow();
 }
 
@@ -2446,7 +2534,20 @@ function open(libraryID) {
 	endSitting("feed");
 	mode = "feed";
 	scopeColl = null;
+	scopeGroup = null;
 	scopeLib = libraryID || null;
+	return openWindow();
+}
+
+// A group of feeds, dealt as one deck. Still a feed deck in every other way:
+// the same keys, the same filing, the same clock.
+function openGroup(name) {
+	if (!groupRows().some((r) => r.id === name)) return;
+	endSitting("feed");
+	mode = "feed";
+	scopeColl = null;
+	scopeLib = null;
+	scopeGroup = name;
 	return openWindow();
 }
 
@@ -2510,7 +2611,9 @@ async function reload() {
 	paint(w, "Loading…");
 	try {
 		await loadKatex();
-		ids = isFeedMode() ? await loadIDs(scopeLib) : await loadCollectionIDs(scopeColl);
+		ids = isFeedMode()
+			? await loadIDs(scopeGroup ? groupLibs(scopeGroup) : scopeLib)
+			: await loadCollectionIDs(scopeColl);
 		total = ids.length;
 		// Dealt from a row in Zotero's items list: start on that card. Asked for
 		// once and then forgotten, so the next deal starts at the top again, and
@@ -2583,10 +2686,14 @@ function build(w) {
 	// `rows` are { name, n } and `n` is the trailing figure, or null for none.
 	// `sift`, where a caller has one, gets first sight of the query: it can drop
 	// rows and hand back what is left of the text to rank them by.
-	const pickMenu = ({ placeholder, rows, sel, empty, onPick, sift }) => {
+	const pickMenu = ({ placeholder, rows, sel, empty, onPick, sift, make }) => {
 		const find = (q) => {
 			const cut = sift ? sift(q, rows) : { q, rows };
-			return rank(cut.q, cut.rows, (r) => r.name);
+			const shown = rank(cut.q, cut.rows, (r) => r.name);
+			// A list you can add to: what you typed, offered as its own row when
+			// it is not already one.
+			const extra = make && cut.q.trim() ? make(cut.q.trim()) : null;
+			return extra ? shown.concat([extra]) : shown;
 		};
 		menu = el(doc, "div", "feedpick");
 		const input = doc.createElement("input");
@@ -2673,25 +2780,65 @@ function build(w) {
 		// passing through.
 		const rows = deckRows(feed, feedRows(), collRows.length
 			? collRows
-			: colls.map((c) => ({ id: c.id, name: c.path, n: null })));
+			: colls.map((c) => ({ id: c.id, name: c.path, n: null })), groupRows());
 		if (rows.length < 2) return flash("Nothing else to riffle");
 		const here = feed ? scopeLib : scopeColl;
-		const isHere = (r) => isDeckHere(r, feed, here);
+		const isHere = (r) => isDeckHere(r, feed, here, scopeGroup);
 		pickMenu({
-			placeholder: "Search feeds and collections (@f, @c)…",
+			placeholder: "Search feeds, groups and collections (@f, @c, @g)…",
 			rows,
 			sift: (q, all) => {
 				const cut = deckSift(q);
-				return { q: cut.q, rows: cut.coll === null ? all : all.filter((r) => r.coll === cut.coll) };
+				return {
+					q: cut.q,
+					rows: cut.kind ? all.filter((r) => deckKind(r) === cut.kind) : all,
+				};
 			},
 			// Opens on whichever one you are already riffling.
 			sel: rows.findIndex(isHere),
-			empty: "No matching feed or collection",
+			empty: "No matching feed, group or collection",
 			onPick: (r) => {
 				if (isHere(r)) return;
-				// The same two doors the menus use, so switching here sets a deck
-				// up exactly as opening it from the library would.
-				Promise.resolve(r.coll ? openCollection(r.id) : open(r.id)).catch(oops);
+				// The same doors the menus use, so switching here sets a deck up
+				// exactly as opening it from the library would.
+				const go = r.group ? openGroup(r.id) : r.coll ? openCollection(r.id) : open(r.id);
+				Promise.resolve(go).catch(oops);
+			},
+		});
+	};
+
+	// Zotero has no folders for feeds, so this is where ours are made: the same
+	// dropdown, over the same header, listing the groups this feed is in and the
+	// ones it is not. Typing a name that is not there yet offers to make it.
+	const doGroup = () => {
+		if (menu) return closeFeeds();
+		if (!isFeedMode()) return;
+		const item = current();
+		const lib = (item && item.libraryID) || scopeLib;
+		const url = lib && feedAddress(lib);
+		if (!url) return flash("No feed to put in a group");
+		const feedName2 = safe(() => Zotero.Libraries.get(lib).name, "this feed");
+		const mine = readGroups();
+		const inIt = (g) => g.urls.includes(url);
+		const rows = mine.map((g) => ({
+			id: g.name,
+			// The tick goes on the end: a mark in front of the name is a
+			// character the search has to get past first.
+			name: g.name + (inIt(g) ? " \u2713" : ""),
+			n: g.urls.length,
+		}));
+		pickMenu({
+			placeholder: "Group \u201c" + feedName2 + "\u201d\u2026",
+			rows,
+			empty: "No group of that name yet \u2014 type one",
+			make: (q) => (mine.some((g) => g.name.toLowerCase() === q.toLowerCase())
+				? null
+				: { id: q, name: "New group \u201c" + q + "\u201d", n: null }),
+			onPick: (r) => {
+				const added = setGrouped(r.id, url);
+				flash(added
+					? feedName2 + " \u2192 " + groupName(r.id)
+					: feedName2 + " out of " + groupName(r.id));
 			},
 		});
 	};
@@ -3001,6 +3148,7 @@ function build(w) {
 			["o", "open", openURL, true],
 			["O", "show in library", showInLibrary, true],
 			["c", "copy…", openCopy, true],
+			["G", "group this feed", doGroup, true],
 			["F", "reread this feed", doRefetch, true],
 			["R", "refresh the feed", doRefresh, true],
 			["+/−", "size", sized(), true],
@@ -3342,7 +3490,11 @@ function build(w) {
 		// Only the deck that has one looks a collection up: Collections.get(null)
 		// throws, and safe() would log that once per card drawn.
 		feedName.textContent = isFeedMode()
-			? safe(() => Zotero.Libraries.get(item.libraryID).name, "")
+			// In a group deck the feed name alone would not say which deck you
+			// are in, and the deck name alone would not say where the card came
+			// from. Both, then, in that order.
+			? (scopeGroup ? scopeGroup + " \u203a " : "")
+				+ safe(() => Zotero.Libraries.get(item.libraryID).name, "")
 			: safe(() => Zotero.Collections.get(scopeColl).name, "")
 				+ (deep ? " + subcollections" : "");
 		count.textContent = `${cursor + 1} / ${total}`;
@@ -3693,6 +3845,8 @@ function build(w) {
 		if (!r) return;
 		nextFeeds = [];
 		nextDrop = null;
+		// Out of a group and into one feed, if that is where you were.
+		scopeGroup = null;
 		scopeLib = r.id;
 		reload().catch(oops);
 	};
@@ -3760,7 +3914,10 @@ function build(w) {
 	const doRefresh = () => {
 		if (busy || !isFeedMode()) return;
 		const item = current();
-		const lib = (item && item.libraryID) || scopeLib;
+		// The feed the card came from; with no card in front of you, the deck —
+		// which in a group deck is every feed in the group.
+		const lib = (item && item.libraryID) || scopeLib
+			|| (scopeGroup ? groupLibs(scopeGroup) : null);
 		const before = ids.length;
 		if (item) startAt = item.id;
 		flash("Refreshing\u2026");
@@ -4614,6 +4771,7 @@ function build(w) {
 			case "o": e.preventDefault(); openURL(); break;
 			case "O": e.preventDefault(); showInLibrary(); break;
 			case "F": e.preventDefault(); doRefetch(); break;
+			case "G": e.preventDefault(); doGroup(); break;
 			case "R": e.preventDefault(); doRefresh(); break;
 			case "c": e.preventDefault(); openCopy(); break;
 			case "f": e.preventDefault(); openFeeds(); break;
@@ -4863,6 +5021,6 @@ if (typeof module !== "undefined") {
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse, unparserError, splitLinks, looksMarkup,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
-		prefOn, copyChoices, makeKey, eatsTail, deckRows, isDeckHere, deckSift, linkKey, indexEntry, rereadSet, setReread,
+		prefOn, copyChoices, makeKey, eatsTail, deckRows, isDeckHere, deckSift, deckKind, parseGroups, writeGroups, toggleGroup, linkKey, indexEntry, rereadSet, setReread,
 		noteHTML, inlineNote, bankTime, endSitting, stat, statReset };
 }
