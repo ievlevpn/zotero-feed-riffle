@@ -58,7 +58,7 @@ const DROP_CAP = 60; // rows drawn in a picker dropdown
 // screen itself offers get through; the arrows are handled before this and put
 // you back on the card.
 const END_KEYS = new Set(["Escape", "Enter", "ArrowUp", "ArrowDown", " ",
-	"u", "n", "+", "=", "-", "_", "0", "?", "/"]);
+	"u", "n", "R", "+", "=", "-", "_", "0", "?", "/"]);
 
 let menuID = null;
 let feedMenuID = null;
@@ -1309,6 +1309,27 @@ async function refetchDeck(doc, libraryID, deckIDs) {
 		});
 	}
 	return { read: fixed.length, gone, seen: mine.length };
+}
+
+// Zotero's own Refresh Feed, from the deck rather than from the collections
+// pane: the same updateFeed() the toolbar button calls, so the items arrive the
+// way they always do — Zotero's parse, Zotero's dedup, Zotero's read state —
+// and the deck is dealt again around them. The feed is the one the card came
+// from; with no card to go on, the deck's own scope, and an all-feeds deck at
+// its end refreshes them all, which is what "all feeds" means everywhere else.
+async function refreshFeeds(libraryID) {
+	const one = libraryID && safe(() => Zotero.Feeds.get(libraryID), null);
+	if (one) {
+		await one.updateFeed();
+		return true;
+	}
+	if (libraryID) return false;
+	const all = safe(() => Zotero.Feeds.getAll(), []) || [];
+	if (!all.length) return false;
+	// One that is down should not take the rest with it.
+	await Promise.all(all.map((f) => Promise.resolve(safe(() => f.updateFeed()))
+		.catch(oops)));
+	return true;
 }
 
 // Dealt from a feed that is marked, the deck is reread without being asked. It
@@ -2981,6 +3002,7 @@ function build(w) {
 			["O", "show in library", showInLibrary, true],
 			["c", "copy…", openCopy, true],
 			["F", "reread this feed", doRefetch, true],
+			["R", "refresh the feed", doRefresh, true],
 			["+/−", "size", sized(), true],
 			["0", "reset size", () => setScale(1), true],
 			["↑/↓/Space", "scroll", null, true],
@@ -3166,6 +3188,8 @@ function build(w) {
 			.concat([["u", "undo", () => { ending = false; doUndo(); }]])
 			.concat(nextFeeds.length || stopped
 				? [] : [["r", "reload", () => reload().catch(oops)]])
+			// A cleared feed is where you most want more of it.
+			.concat(isFeedMode() ? [["R", "refresh", doRefresh]] : [])
 			.concat([["Esc", "close", () => w.close()]]));
 		feedName.textContent = "";
 		count.textContent = "";
@@ -3727,6 +3751,32 @@ function build(w) {
 		}).catch((e) => {
 			oops(e);
 			flash("Could not read the feed");
+		}));
+	};
+
+	// Ask Zotero for the feed again, then deal what came. Your place is kept:
+	// the deck comes back around the card you were on, with anything new sitting
+	// where its date puts it — usually in front of you, which is the point.
+	const doRefresh = () => {
+		if (busy || !isFeedMode()) return;
+		const item = current();
+		const lib = (item && item.libraryID) || scopeLib;
+		const before = ids.length;
+		if (item) startAt = item.id;
+		flash("Refreshing\u2026");
+		guard(refreshFeeds(lib).then((ok) => {
+			if (!ok) {
+				startAt = null;
+				return flash("No feed to refresh");
+			}
+			return reload().then(() => {
+				const got = ids.length - before;
+				flash(got > 0 ? got + (got === 1 ? " new item" : " new items") : "Nothing new");
+			});
+		}).catch((e) => {
+			oops(e);
+			startAt = null;
+			flash("Could not refresh the feed");
 		}));
 	};
 
@@ -4564,6 +4614,7 @@ function build(w) {
 			case "o": e.preventDefault(); openURL(); break;
 			case "O": e.preventDefault(); showInLibrary(); break;
 			case "F": e.preventDefault(); doRefetch(); break;
+			case "R": e.preventDefault(); doRefresh(); break;
 			case "c": e.preventDefault(); openCopy(); break;
 			case "f": e.preventDefault(); openFeeds(); break;
 			// Shift is not always where ? is; / is the key under it either way.

@@ -41,6 +41,7 @@ Each card shows the title, authors, date and abstract.
 | <kbd>o</kbd> | open the paper in your browser |
 | <kbd>Shift</kbd>+<kbd>O</kbd> | show the item in Zotero's own items list |
 | <kbd>c</kbd> | copy something off the card — link, reference, DOI, citation key, title, abstract |
+| <kbd>Shift</kbd>+<kbd>R</kbd> | ask Zotero to fetch the feed again, then deal what arrived — your place is kept |
 | <kbd>Shift</kbd>+<kbd>F</kbd> | reread this deck's cards straight from the feed, when the importer's copies are mangled or thin |
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
 | <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> | text bigger, smaller, reset (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> too) |
@@ -299,6 +300,20 @@ Available PDF* (the DOI, then the landing page — an arXiv abstract page
 advertises its PDF, so no DOI is needed), in the background, after the card has
 already flicked away. For the handful of papers that deserve full metadata,
 Zotero's own *Add to My Library* is still right there.
+
+## Fetching the feed again
+
+<kbd>Shift</kbd>+<kbd>R</kbd> is Zotero's own **Refresh Feed**, reachable from
+the deck instead of the collections pane: it calls the same `updateFeed()` the
+toolbar button does, so items arrive Zotero's way — its parse, its deduplication,
+its read state — and then the deck is dealt again around them. Your place is
+kept: you come back to the card you were on, with whatever arrived sitting where
+its date puts it, which is usually in front of you. The flash says how many came.
+
+The feed is the one the card came from, so it works on an all-feeds deck too.
+With no card to go on — on the finish screen, where a refresh is the thing you
+actually want — it takes the deck's own feed, and an all-feeds deck refreshes
+them all. A feed that is down does not take the others with it.
 
 ## When the importer mangles an item
 
