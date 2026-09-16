@@ -41,6 +41,7 @@ Each card shows the title, authors, date and abstract.
 | <kbd>o</kbd> | open the paper in your browser |
 | <kbd>Shift</kbd>+<kbd>O</kbd> | show the item in Zotero's own items list |
 | <kbd>c</kbd> | copy something off the card — link, reference, DOI, citation key, title, abstract |
+| <kbd>Shift</kbd>+<kbd>T</kbd> | log a sitting you didn't track — `45m yesterday`, `1h30 rough paths` |
 | <kbd>Shift</kbd>+<kbd>G</kbd> | put this feed in a group, or take it out — groups are folders Zotero does not have |
 | <kbd>Shift</kbd>+<kbd>R</kbd> | ask Zotero to fetch the feed again, then deal what arrived — your place is kept |
 | <kbd>Shift</kbd>+<kbd>F</kbd> | reread this deck's cards straight from the feed, when the importer's copies are mangled or thin |
@@ -424,6 +425,26 @@ and the clock starts again for a deck that is not counted the same way.
 Once logging is on, the finish screen also carries a note field — `n` to reach
 it — for a line about what the sitting was. It goes on the same *Feed reading*
 row, in the field Reading Time's own timer notes use.
+
+A sitting you did without this window open — read on the train, read last night
+and forgot — goes in by hand with <kbd>Shift</kbd>+<kbd>T</kbd>, on a card or on
+the finish screen. It opens the same dropdown everything else does, and you write
+the sitting the way you would say it:
+
+| | |
+|---|---|
+| `45m` | 45 minutes, ending at the hour it is now |
+| `90` | a bare number is minutes |
+| `1h30` | an hour and a half; `1.5h` and `1,5h` work too |
+| `1h yesterday` | ending at this hour yesterday |
+| `2h yesterday 21:00` | a time is where it *starts* — what "I read at nine" means |
+| `2h 2026-09-01 08:15` | or give the date outright |
+| `90 rough paths` | whatever is left over is the note |
+
+The length is the only part you cannot leave out. The row under the box spells
+back what will be written — *1 h 30 min, from Mon 14 Sep, 21:00 · rough paths* —
+before <kbd>⏎</kbd> commits it, because a length typed by hand is worth reading
+twice. It lands as the same *Feed reading* row a tracked sitting does.
 
 The answer lives in `extensions.zotero.feedRiffle.readingTime`; clear it in the
 config editor to be asked again. Without Reading Time installed nothing here

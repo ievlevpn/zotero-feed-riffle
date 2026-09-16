@@ -2,7 +2,7 @@
 const assert = require("assert");
 const { score, rank, deLatex, splitAbstract, authorLine, shortDate, splitTags,
 	foldLibraryRows, heldPhrase, importerCut, imgMath, fmtSpan,
-	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, makeKey, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift, deckKind, parseGroups, writeGroups, toggleGroup, linkKey, indexEntry, rereadSet, setReread } = require("./bootstrap.js");
+	summaryLine, deckLine, seenLine, randomAhead, prefOn, copyChoices, makeKey, parseSitting, noteHTML, bankTime, endSitting, stat, statReset, eatsTail, deckRows, isDeckHere, deckSift, deckKind, parseGroups, writeGroups, toggleGroup, linkKey, indexEntry, rereadSet, setReread } = require("./bootstrap.js");
 
 // --- fuzzy scoring: lower is better, word starts are cheap -----------------
 // Both of these match "rp"; the word-boundary one must win by a mile.
@@ -549,6 +549,47 @@ assert.strictEqual(copyChoices({ title: "Ends in a question?" })[0].text,
 	"Ends in a question?", "a reference already punctuated gains no second stop");
 assert.strictEqual(copyChoices({ authors: "A", year: "2026" })[0].text, "A (2026).",
 	"and a title-less one still reads as a line");
+
+// --- a sitting written by hand ---------------------------------------------
+// Tue 15 Sep 2026, 14:30 local, as the clock the parser is handed.
+const NOW = new Date(2026, 8, 15, 14, 30, 0, 0).getTime();
+const sat = (s) => parseSitting(s, NOW);
+const mins = (s) => sat(s).seconds / 60;
+const startOf = (s) => new Date(sat(s).began);
+
+assert.strictEqual(mins("45m"), 45, "minutes, with the m");
+assert.strictEqual(mins("90"), 90, "and a bare number is minutes too");
+assert.strictEqual(mins("1h"), 60, "an hour");
+assert.strictEqual(mins("1h30"), 90, "an hour and a half, the way it is written");
+assert.strictEqual(mins("1h30m"), 90, "with or without the m");
+assert.strictEqual(mins("1.5h"), 90, "or as a fraction");
+assert.strictEqual(mins("1,5h"), 90, "including the comma half of the world writes");
+assert.strictEqual(parseSitting("", NOW), null, "nothing is nothing");
+assert.strictEqual(parseSitting("yesterday", NOW), null, "and a day with no length is not a sitting");
+assert.strictEqual(parseSitting("rough paths", NOW), null, "nor a note on its own");
+
+// With no time of day, the sitting ends at the hour it is now.
+assert.strictEqual(startOf("45m").getTime(), NOW - 45 * 60000, "45m ends now");
+assert.strictEqual(startOf("1h yesterday").getDate(), 14, "yesterday is the day before");
+assert.strictEqual(startOf("1h yesterday").getHours(), 13,
+	"ending at this hour yesterday, so starting an hour before it");
+assert.strictEqual(startOf("30m today").getTime(), NOW - 30 * 60000, "today is the plain case");
+
+// With one, that is where it starts — which is what "I read at nine" means.
+const nine = startOf("2h yesterday 21:00");
+assert.deepStrictEqual([nine.getDate(), nine.getHours(), nine.getMinutes()], [14, 21, 0],
+	"nine in the evening, the day before");
+const dated = startOf("2h 2026-09-01 08:15");
+assert.deepStrictEqual([dated.getMonth(), dated.getDate(), dated.getHours()], [8, 1, 8],
+	"a date says which day, whatever the day words say");
+assert.strictEqual(startOf("2h 2026-09-01").getHours(), 12,
+	"a date with no time still ends at this hour, so it starts two before");
+
+// Whatever is left over is what the sitting was.
+assert.strictEqual(sat("90 rough paths").note, "rough paths", "the rest is the note");
+assert.strictEqual(sat("1h yesterday SPDEs and a coffee").note, "SPDEs and a coffee",
+	"after the day, too");
+assert.strictEqual(sat("45m").note, null, "and no note is null, not an empty line");
 
 // --- banking the sitting into Reading Time ---------------------------------
 // The other plugin is optional: absent, declined, or unanswered all mean the
