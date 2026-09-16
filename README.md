@@ -44,6 +44,7 @@ Each card shows the title, authors, date and abstract.
 | <kbd>Shift</kbd>+<kbd>G</kbd> | put this feed in a group, or take it out — groups are folders Zotero does not have |
 | <kbd>Shift</kbd>+<kbd>R</kbd> | ask Zotero to fetch the feed again, then deal what arrived — your place is kept |
 | <kbd>Shift</kbd>+<kbd>F</kbd> | reread this deck's cards straight from the feed, when the importer's copies are mangled or thin |
+| <kbd>[</kbd> <kbd>]</kbd> | the same as <kbd>←</kbd> and <kbd>→</kbd>, without leaving the letters |
 | <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>Space</kbd> | scroll a long description |
 | <kbd>+</kbd> / <kbd>−</kbd> / <kbd>0</kbd> | text bigger, smaller, reset (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> too) |
 | <kbd>?</kbd> | help and settings — every key, and what to remember between sittings |

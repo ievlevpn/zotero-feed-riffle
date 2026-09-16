@@ -3154,6 +3154,7 @@ function build(w) {
 			["+/−", "size", sized(), true],
 			["0", "reset size", () => setScale(1), true],
 			["↑/↓/Space", "scroll", null, true],
+			["[ ]", "the same as ←/→", null, true],
 			["?", "help", openHelp, "bar"],
 			["Esc", "close", stop]]
 		: [["←/→", "browse", [prev, next]], ["r", "random", doRandom],
@@ -3174,6 +3175,7 @@ function build(w) {
 			["+/−", "size", sized(), true],
 			["0", "reset size", () => setScale(1), true],
 			["↑/↓/Space", "scroll", null, true],
+			["[ ]", "the same as ←/→", null, true],
 			["?", "help", openHelp, "bar"],
 			["Esc", "close", stop]]);
 	const cardHints = () => hint(keyList().filter((k) => k[3] !== true));
@@ -4715,6 +4717,22 @@ function build(w) {
 		if (e.target === noteInput && noteInput) {
 			if (e.key !== "Enter" && e.key !== "Escape") return;
 			noteInput.blur();
+		}
+		// [ and ] where the arrows are, for a hand that would rather not leave the
+		// letters. Handed back to this same function as the arrow they stand for,
+		// so every branch below has one kind of key to think about — the shifted
+		// pair that jumps a chunk of a collection deck included. After the note
+		// field above, so a bracket typed into it is a bracket.
+		if (e.key === "[" || e.key === "]") {
+			e.preventDefault();
+			return keyHandler({
+				key: e.key === "[" ? "ArrowLeft" : "ArrowRight",
+				shiftKey: e.shiftKey,
+				metaKey: e.metaKey,
+				ctrlKey: e.ctrlKey,
+				target: e.target,
+				preventDefault: () => {},
+			});
 		}
 		if (e.metaKey || e.ctrlKey) {
 			if (e.key === "z") { e.preventDefault(); doUndo(); }
