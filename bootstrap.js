@@ -59,7 +59,7 @@ const DROP_CAP = 60; // rows drawn in a picker dropdown
 // screen itself offers get through; the arrows are handled before this and put
 // you back on the card.
 const END_KEYS = new Set(["Escape", "Enter", "ArrowUp", "ArrowDown", " ",
-	"u", "n", "R", "T", "+", "=", "-", "_", "0", "?", "/"]);
+	"u", "n", "R", "+", "=", "-", "_", "0", "?", "/"]);
 
 let menuID = null;
 let feedMenuID = null;
@@ -149,71 +149,6 @@ function bankTime() {
 	if (api && api.addFeedSession(Math.round(stat.spent / 1000), stat.began, stat.note)) {
 		stat.banked = true;
 	}
-}
-
-// A sitting you did but did not have this window open for. Written the way you
-// would say it: a length, and then — when it was not just now — a day, a time,
-// and anything left over as the note.
-//
-//   45m            45 minutes, ending at this hour
-//   1h30 yesterday an hour and a half, ending at this hour yesterday
-//   90 rough paths an hour and a half, and what it was
-//   2h 2026-09-14 21:00 spdes   a sitting that started at nine on the 14th
-//
-// A length is the one thing you cannot leave out. With no time of day the
-// sitting *ends* at the hour it is now, which is both predictable and usually
-// right: you log what you just did, or what you did at about this time
-// yesterday. With a time, that is where it starts, because that is what anyone
-// means by "I read at nine". Exported for test.js.
-function parseSitting(text, now) {
-	let rest = String(text || "").trim();
-	if (!rest) return null;
-	const num = (x) => parseFloat(String(x).replace(",", "."));
-	let mins = 0;
-	const h = /^(\d+(?:[.,]\d+)?)\s*h(?:ours?|rs?)?\s*/i.exec(rest);
-	if (h) {
-		mins += num(h[1]) * 60;
-		rest = rest.slice(h[0].length);
-	}
-	// A bare number is minutes, which is how anyone says it out loud, and how
-	// "1h30" finishes. Not when a "-" or a ":" follows it, though: that number is
-	// the year of a date or the hour of a time, and taking it for minutes would
-	// log a sitting of two thousand and twenty-six.
-	const m = /^(\d+(?:[.,]\d+)?)\s*(?:m(?:in(?:ute)?s?)?)?(?![\d:-])\s*/i.exec(rest);
-	if (m) {
-		mins += num(m[1]);
-		rest = rest.slice(m[0].length);
-	}
-	// Nothing to log, or a day with no length in front of it.
-	if (!(mins > 0)) return null;
-
-	const when = new Date(now);
-	const day = /^(yesterday|today)\s*/i.exec(rest);
-	if (day) {
-		if (/^y/i.test(day[1])) when.setDate(when.getDate() - 1);
-		rest = rest.slice(day[0].length);
-	}
-	else {
-		const date = /^(\d{4})-(\d{1,2})-(\d{1,2})\s*/.exec(rest);
-		if (date) {
-			// The date given, the clock left where it is: a time of day, if one
-			// follows, will overwrite it, and if none does this is the "ending at
-			// this hour" the no-time case wants.
-			when.setFullYear(+date[1], +date[2] - 1, +date[3]);
-			rest = rest.slice(date[0].length);
-		}
-	}
-
-	const at = /^(\d{1,2}):(\d{2})\s*/.exec(rest);
-	let began;
-	if (at && +at[1] < 24 && +at[2] < 60) {
-		when.setHours(+at[1], +at[2], 0, 0);
-		began = when.getTime();
-		rest = rest.slice(at[0].length);
-	}
-	else began = when.getTime() - Math.round(mins * 60000);
-
-	return { seconds: Math.round(mins * 60), began, note: rest.trim() || null };
 }
 
 // The clock runs for the sitting, not the deck, so moving from one feed to the
@@ -2872,43 +2807,6 @@ function build(w) {
 		});
 	};
 
-	// A sitting you did without this window open — read on the train, read
-	// yesterday and forgot to bank it. The same dropdown as everything else,
-	// with the row you are about to log spelled back at you before you commit:
-	// a length written by hand is exactly the thing worth reading twice.
-	const doLogTime = () => {
-		if (menu) return closeFeeds();
-		const api = readingTime();
-		if (!api) return flash("Reading Time is not installed");
-		const said = (ms) => new Date(ms).toLocaleString(undefined, {
-			weekday: "short", day: "numeric", month: "short",
-			hour: "2-digit", minute: "2-digit",
-		});
-		pickMenu({
-			placeholder: "Log a sitting: 45m yesterday\u2026",
-			rows: [],
-			empty: "A length first \u2014 45m, 1h30, 90 \u2014 then a day, a time, a note",
-			make: (q) => {
-				const got = parseSitting(q, Date.now());
-				if (!got) return null;
-				return {
-					id: "log",
-					name: fmtSpan(got.seconds * 1000) + ", from " + said(got.began)
-						+ (got.note ? " \u00b7 " + got.note : ""),
-					n: null,
-					got,
-				};
-			},
-			onPick: (r) => {
-				if (!r.got) return;
-				const ok = safe(() => api.addFeedSession(r.got.seconds, r.got.began, r.got.note), false);
-				flash(ok
-					? "Logged " + fmtSpan(r.got.seconds * 1000) + " to Reading Time"
-					: "Reading Time would not take it");
-			},
-		});
-	};
-
 	// Zotero has no folders for feeds, so this is where ours are made: the same
 	// dropdown, over the same header, listing the groups this feed is in and the
 	// ones it is not. Typing a name that is not there yet offers to make it.
@@ -3251,7 +3149,6 @@ function build(w) {
 			["O", "show in library", showInLibrary, true],
 			["c", "copy…", openCopy, true],
 			["G", "group this feed", doGroup, true],
-			["T", "log a sitting you didn't track", doLogTime, true],
 			["F", "reread this feed", doRefetch, true],
 			["R", "refresh the feed", doRefresh, true],
 			["+/−", "size", sized(), true],
@@ -4875,7 +4772,6 @@ function build(w) {
 			case "O": e.preventDefault(); showInLibrary(); break;
 			case "F": e.preventDefault(); doRefetch(); break;
 			case "G": e.preventDefault(); doGroup(); break;
-			case "T": e.preventDefault(); doLogTime(); break;
 			case "R": e.preventDefault(); doRefresh(); break;
 			case "c": e.preventDefault(); openCopy(); break;
 			case "f": e.preventDefault(); openFeeds(); break;
@@ -5125,6 +5021,6 @@ if (typeof module !== "undefined") {
 		splitTags, splitMath, typography, paragraphs, abstractNode, unparse, unparserError, splitLinks, looksMarkup,
 		looksLikeMath, normalizeColor, normalizeTex, refKeys, markClassMath, foldLibraryRows,
 		heldPhrase, importerCut, imgMath, fmtSpan, summaryLine, deckLine, seenLine, randomAhead,
-		prefOn, copyChoices, makeKey, parseSitting, eatsTail, deckRows, isDeckHere, deckSift, deckKind, parseGroups, writeGroups, toggleGroup, linkKey, indexEntry, rereadSet, setReread,
+		prefOn, copyChoices, makeKey, eatsTail, deckRows, isDeckHere, deckSift, deckKind, parseGroups, writeGroups, toggleGroup, linkKey, indexEntry, rereadSet, setReread,
 		noteHTML, inlineNote, bankTime, endSitting, stat, statReset };
 }
