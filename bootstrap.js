@@ -3154,7 +3154,7 @@ function build(w) {
 			["+/−", "size", sized(), true],
 			["0", "reset size", () => setScale(1), true],
 			["↑/↓/Space", "scroll", null, true],
-			["[ ]", "the same as ←/→", null, true],
+			["[ ] q e", "the same as ←/→", null, true],
 			["?", "help", openHelp, "bar"],
 			["Esc", "close", stop]]
 		: [["←/→", "browse", [prev, next]], ["r", "random", doRandom],
@@ -3175,7 +3175,7 @@ function build(w) {
 			["+/−", "size", sized(), true],
 			["0", "reset size", () => setScale(1), true],
 			["↑/↓/Space", "scroll", null, true],
-			["[ ]", "the same as ←/→", null, true],
+			["[ ] q e", "the same as ←/→", null, true],
 			["?", "help", openHelp, "bar"],
 			["Esc", "close", stop]]);
 	const cardHints = () => hint(keyList().filter((k) => k[3] !== true));
@@ -4718,16 +4718,27 @@ function build(w) {
 			if (e.key !== "Enter" && e.key !== "Escape") return;
 			noteInput.blur();
 		}
-		// [ and ] where the arrows are, for a hand that would rather not leave the
-		// letters. Handed back to this same function as the arrow they stand for,
-		// so every branch below has one kind of key to think about — the shifted
-		// pair that jumps a chunk of a collection deck included. After the note
-		// field above, so a bracket typed into it is a bracket.
-		if (e.key === "[" || e.key === "]") {
+		// The arrows, for a hand that would rather not leave the letters: [ and ]
+		// under the right hand, q and e under the left. Both pairs were free —
+		// a and d were not, a files on a collection deck — and a key that is
+		// free needs no setting to turn it off. Handed back to this same
+		// function as the arrow it stands for, so every branch below has one
+		// kind of key to think about, the shifted pair that jumps a chunk of a
+		// collection deck included. After the note field above, so a letter
+		// typed into it is a letter.
+		// Shifted, they jump a chunk of a collection deck, as the shifted arrows
+		// do — which means taking the characters the shift actually produces:
+		// "{" is what Shift+[ sends, and a handler waiting for "[" with a shift
+		// flag would wait for ever.
+		const LEFT = "[{qQ", RIGHT = "]}eE";
+		if (e.key.length === 1 && (LEFT + RIGHT).includes(e.key)
+			&& !e.metaKey && !e.ctrlKey && !e.altKey) {
 			e.preventDefault();
 			return keyHandler({
-				key: e.key === "[" ? "ArrowLeft" : "ArrowRight",
-				shiftKey: e.shiftKey,
+				key: LEFT.includes(e.key) ? "ArrowLeft" : "ArrowRight",
+				// "{" carries no shift flag of its own on every layout, so the
+				// character is the shift: either says "jump".
+				shiftKey: e.shiftKey || "{}QE".includes(e.key),
 				metaKey: e.metaKey,
 				ctrlKey: e.ctrlKey,
 				target: e.target,
