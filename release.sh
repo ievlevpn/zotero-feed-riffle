@@ -50,7 +50,13 @@ git add manifest.json bootstrap.js release.sh test.js README.md update.json loca
 # note on its spaces into one -m argument per word.
 MSG=(-m "Release v$VER")
 if [ $# -gt 0 ]; then MSG+=(-m "$(printf -- '- %s\n' "$@")"); fi
-git commit "${MSG[@]}" || echo "(nothing to commit)"
+# Skip only a genuinely empty commit - any other commit failure (hook,
+# identity) must stop the release instead of publishing the old HEAD
+if git diff --cached --quiet; then
+  echo "(nothing to commit)"
+else
+  git commit "${MSG[@]}"
+fi
 git push
 
 # Changelog = commits since the previous tag (drop the "Release vX" commits).
